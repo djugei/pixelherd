@@ -66,6 +66,7 @@ enum Selection {
     Young,
     Spawns,
     Generation,
+    //todo: add mouse selection
 }
 
 impl Selection {
@@ -218,10 +219,15 @@ impl Outputs {
 }
 
 impl App {
-    fn render(&mut self, args: &RenderArgs) {
+    fn render<C>(&mut self, args: &RenderArgs, glyph_cache: &mut C)
+    where
+        C: graphics::character::CharacterCache<Texture = opengl_graphics::Texture>,
+        <C as graphics::character::CharacterCache>::Error: std::fmt::Debug,
+    {
         use graphics::*;
 
         const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+        const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
         //const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
         const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
         const BLUE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
@@ -313,24 +319,35 @@ impl App {
         for (index, blip) in self.blips.iter().enumerate() {
             let (px, py) = (blip.status.pos[0], blip.status.pos[1]);
             let (pdx, pdy) = (blip.status.vel[0], blip.status.vel[1]);
-            let transform = c
+            let pos_transform = c
                 .transform
-                .trans(px / SIM_WIDTH * width, py / SIM_HEIGHT * height)
-                .zoom(7.)
-                .orient(pdx, pdy)
-                .rot_deg(90.);
+                .trans(px / SIM_WIDTH * width, py / SIM_HEIGHT * height);
+            let transform = pos_transform.zoom(7.).orient(pdx, pdy).rot_deg(90.);
             let mut search = self
                 .tree
                 .locate_within_distance([px, py], LOCAL_ENV)
                 .filter(|d| d.position() != &[px, py]);
             let nb = search.next();
             if Some(index) == marker {
-                //todo: text-render those stats
-                /*println!(
-                    "repr {}, chidlren: {}, hp: {}, food: {}",
-                    blip.genes.repr_tres, blip.status.children, blip.status.hp, blip.status.food
-                );*/
                 polygon(PURPLE, TRI, transform.zoom(2.), gl);
+
+                let display = format!(
+                    "children: {}\nhp: {:.2}\ngeneration: {}\nage: {:.2}",
+                    blip.status.children, blip.status.hp, blip.status.generation, blip.status.age,
+                );
+                let size = 20_usize;
+
+                for (idx, txt) in display.split('\n').enumerate() {
+                    text(
+                        BLACK,
+                        size as u32,
+                        txt,
+                        glyph_cache,
+                        pos_transform.trans(0., (size * idx) as f64),
+                        gl,
+                    )
+                    .unwrap();
+                }
             } else if nb.is_some() {
                 polygon(RED, TRI, transform, gl);
             } else {
@@ -596,6 +613,11 @@ fn main() {
             }
         }
     }
+    let ts = opengl_graphics::TextureSettings::new();
+    let mut cache =
+    //fixme: choose a font thats actually available on systems
+        opengl_graphics::GlyphCache::new("/usr/share/fonts/TTF/FiraCode-Regular.ttf", (), ts)
+            .unwrap();
 
     let mut hurry = 1;
     let mut pause = false;
@@ -653,7 +675,7 @@ fn main() {
         }
         if let Some(args) = e.render_args() {
             if !hide {
-                app.render(&args);
+                app.render(&args, &mut cache);
             }
         }
 

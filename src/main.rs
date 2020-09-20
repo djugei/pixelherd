@@ -23,6 +23,10 @@ use rstar::RTree;
 
 use rand::Rng;
 
+//use rayon::prelude::{IndexedParallelIterator, ParallelIterator};
+use atomic::Atomic;
+use atomic::Ordering;
+
 mod vecmath;
 use vecmath::Vector;
 
@@ -44,10 +48,9 @@ type BlipLoc = PointWithData<usize, [f64; 2]>;
 
 pub struct App {
     gl: GlGraphics, // OpenGL drawing backend.
-    // todo: maybe blips don't need to store their own positon
     blips: Vec<Blip>,
     // this probably needs to be atomic u64
-    foodgrid: [[f64; FOOD_HEIGHT]; FOOD_WIDTH],
+    foodgrid: [[Atomic<f64>; FOOD_HEIGHT]; FOOD_WIDTH],
     tree: RTree<BlipLoc>,
     selection: Selection,
 }
@@ -105,7 +108,7 @@ impl Blip {
             genes: Genes::new(&mut rng),
         }
     }
-    fn split(&mut self) -> Self {
+    fn split<R: Rng>(&mut self, mut rng: R) -> Self {
         self.status.hp /= 2.;
         self.status.children += 1;
         let mut new = self.clone();
@@ -115,8 +118,6 @@ impl Blip {
         new.status.children = 0;
         new.status.vel[0] += 1.;
         new.status.vel[1] += 1.;
-        //todo: request rng
-        let mut rng = rand::thread_rng();
 
         new.genes.mutate(&mut rng);
         new
@@ -230,7 +231,7 @@ impl App {
                     .zoom(10.)
                     .scale(width / SIM_WIDTH, height / SIM_HEIGHT);
                 // maybe logscale this
-                let trans = self.foodgrid[w][h].min(10.) / 10.;
+                let trans = self.foodgrid[w][h].get_mut().min(10.) / 10.;
                 rectangle([0.0, 1.0, 0.0, trans as f32], SQR, transform, gl);
             }
         }
@@ -324,10 +325,7 @@ impl App {
         self.gl.draw_end();
     }
 
-    fn update(&mut self, args: &UpdateArgs) {
-        // perf: ask for rng as parameter
-        let mut rng = rand::thread_rng();
-
+    fn update<R: Rng>(&mut self, args: &UpdateArgs, mut rng: R) {
         // update the inputs
         // todo: don't clone here, keep two buffers and swap instead
         let mut new = self.blips.clone();
@@ -372,41 +370,64 @@ impl App {
                 (new.status.pos[0] / 10.) as usize,
                 (new.status.pos[1] / 10.) as usize,
             ];
-            let gridpos = &mut self.foodgrid[gridpos[0]][gridpos[1]];
-            *inputs.smell_mut() = *gridpos;
+            let grid_slot = &self.foodgrid[gridpos[0]][gridpos[1]];
 
-            // fixme: make sure dt is used literally on every change
+            let mut grid_value = grid_slot.load(Ordering::Relaxed);
+            let mut outputs;
+            loop {
+                // there is no synchronization between threads, only the global food object
+                // so only the atomic operaton on it needs to be taken care of.
+                // there is no other operations to synchronize
+                *inputs.smell_mut() = grid_value;
 
-            // inputs are processed at this point, time to feed the brain some data
-            // todo: rn this accesses the new input, not the old, maybe thats good
-            // maybe it needs to change
+                // fixme: make sure dt is used literally on every change
 
-            let outputs = old.genes.brain.think(&inputs);
+                // inputs are processed at this point, time to feed the brain some data
+                // todo: rn this accesses the new input, not the old, maybe thats good
+                // maybe it needs to change
 
-            // now outputs are filled, time to act on them
-            let spike = new.status.spike + outputs.spike() / 2.;
-            new.status.spike = spike.min(1.).max(0.);
+                outputs = old.genes.brain.think(&inputs);
 
-            // change direction
-            const ORTHO: Vector = [0., 1.];
-            let steer = vecmath::scale(ORTHO, outputs.steering());
-            // fixme: handle 0 speed
-            let dir = vecmath::norm(old.status.vel);
+                // now outputs are filled, time to act on them
+                let spike = new.status.spike + outputs.spike() / 2.;
+                new.status.spike = spike.min(1.).max(0.);
 
-            let push = vecmath::rotate(steer, dir);
+                // change direction
+                const ORTHO: Vector = [0., 1.];
+                let steer = vecmath::scale(ORTHO, outputs.steering());
+                // fixme: handle 0 speed
+                let dir = vecmath::norm(old.status.vel);
 
-            let mut vel = vecmath::add(old.status.vel, push);
-            // todo: be smarter about scaling speed, maybe do some log-stuff to simulate drag
-            vel = vecmath::norm(vel);
-            vel = vecmath::scale(vel, outputs.speed());
-            new.status.vel = vel;
+                let push = vecmath::rotate(steer, dir);
 
-            // eat food
-            let speed = outputs.speed().abs();
-            let eating = (*gridpos / speed.max(1.)) * args.dt;
-            if eating != 0. && !eating.is_nan() {
-                *gridpos -= eating;
-                new.status.food += eating;
+                let mut vel = vecmath::add(old.status.vel, push);
+                // todo: be smarter about scaling speed, maybe do some log-stuff to simulate drag
+                vel = vecmath::norm(vel);
+                vel = vecmath::scale(vel, outputs.speed());
+                new.status.vel = vel;
+
+                // eat food
+                let speed = outputs.speed().abs();
+                let eating = (grid_value / speed.max(1.)) * args.dt;
+                if eating != 0. && !eating.is_nan() {
+                    let newval = grid_value - eating;
+                    match grid_slot.compare_exchange(
+                        grid_value,
+                        newval,
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    ) {
+                        Ok(_) => {
+                            new.status.food += eating;
+                        }
+                        Err(v) => {
+                            println!("{:?} had to reloop for cas", gridpos);
+                            grid_value = v;
+                            continue;
+                        }
+                    }
+                }
+                break;
             }
             let digest = new.status.food.min(10. * args.dt);
             new.status.food -= digest;
@@ -424,7 +445,7 @@ impl App {
 
             if new.status.hp > old.genes.repr_tres {
                 println!("new spawn!");
-                let spawn = new.split();
+                let spawn = new.split(&mut rng);
                 spawns.push(spawn);
             }
             new.status.age += args.dt;
@@ -452,7 +473,7 @@ impl App {
             let w: usize = rng.gen_range(0, FOOD_WIDTH);
             let h: usize = rng.gen_range(0, FOOD_HEIGHT);
             let f: f64 = rng.gen_range(1., 4.);
-            self.foodgrid[w][h] += f;
+            *self.foodgrid[w][h].get_mut() += f;
         }
 
         // move blips
@@ -501,9 +522,6 @@ fn scaled_rand<R: Rng>(mut r: R, rate: f64, abs_scale: f64, mul_scale: f64, val:
 }
 
 fn main() {
-    use atomic::Atomic;
-    println!("f64 is atomic {}", Atomic::<f64>::is_lock_free());
-    println!("f32 is atomic {}", Atomic::<f32>::is_lock_free());
     // Change this to OpenGL::V2_1 if not working.
     let opengl = OpenGL::V4_5;
 
@@ -514,12 +532,25 @@ fn main() {
         .build()
         .unwrap();
 
+    let foodgrid = [[0.; FOOD_HEIGHT]; FOOD_WIDTH];
+    //safety: this is absolutely not safe as i am relying on the internal memory layout of a third
+    // party library that is almost guaranteed to not match on 32 bit platforms.
+    //
+    // however i see no other way to initialize this array
+    // try_from is only implemented for array up to size 32 because fucking rust has not const
+    // generics
+    // atomics are not copy, so the [0.;times] constructor does not work
+    // this is an actual value, not a reference so i need to actually change the value instead of
+    // "as-casting" the pointer
+    let foodgrid = unsafe { std::mem::transmute(foodgrid) };
+
     // Create a new game and run it.
     let mut app = App {
         gl: GlGraphics::new(opengl),
         blips: Vec::with_capacity(INITIAL_CELLS),
         tree: RTree::new(),
-        foodgrid: [[0.; FOOD_HEIGHT]; FOOD_WIDTH],
+        //    foodgrid: [[Atomic::new(0.); FOOD_HEIGHT]; FOOD_WIDTH],
+        foodgrid,
         selection: Selection::None,
     };
 
@@ -533,12 +564,12 @@ fn main() {
         for h in 0..FOOD_HEIGHT {
             //fixme: this should be an exponential distribution instead
             if rng.gen_range(0, 3) == 1 {
-                app.foodgrid[w][h] = rng.gen_range(0., 10.);
+                *app.foodgrid[w][h].get_mut() = rng.gen_range(0., 10.);
             }
         }
     }
 
-    let mut hurry = 100;
+    let mut hurry = 1;
     let mut pause = false;
     let mut hide = false;
 
@@ -603,14 +634,14 @@ fn main() {
             } else {
                 if hide {
                     for _ in 0..1000 {
-                        app.update(&UpdateArgs { dt: 0.02 });
+                        app.update(&UpdateArgs { dt: 0.02 }, &mut rng);
                     }
                 } else {
                     if hurry == 1 {
-                        app.update(&args);
+                        app.update(&args, &mut rng);
                     } else {
                         for _ in 0..hurry {
-                            app.update(&UpdateArgs { dt: 0.02 });
+                            app.update(&UpdateArgs { dt: 0.02 }, &mut rng);
                         }
                     }
                 }

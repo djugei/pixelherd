@@ -40,7 +40,7 @@ const FOOD_WIDTH: usize = 50;
 const FOOD_HEIGHT: usize = 50;
 
 const LOCAL_ENV: f64 = 500.;
-const INITIAL_CELLS: usize = 200;
+const INITIAL_CELLS: usize = 100;
 const REPLACEMENT: usize = 20;
 
 const SIM_WIDTH: f64 = (FOOD_WIDTH * 10) as f64;
@@ -144,6 +144,9 @@ struct Genes {
     brain: SimpleBrain,
     mutation_rate: f64,
     repr_tres: f64,
+    // actual clock is multiplied by this
+    clockstretch_1: f64,
+    clockstretch_2: f64,
 }
 
 impl Genes {
@@ -152,6 +155,8 @@ impl Genes {
             brain: SimpleBrain::init(&mut rng),
             mutation_rate: rng.gen_range(-0.001, 0.001) + 0.01,
             repr_tres: rng.gen_range(-10., 10.) + 100.,
+            clockstretch_1: rng.gen_range(0.01, 1.),
+            clockstretch_2: rng.gen_range(0.01, 1.),
         }
     }
     fn mutate<R: Rng>(&self, mut rng: R) -> Self {
@@ -159,11 +164,14 @@ impl Genes {
         let () = new.brain.mutate(&mut rng, self.mutation_rate);
         new.repr_tres *= 1. + rng.gen_range(-self.mutation_rate, self.mutation_rate);
         new.mutation_rate += rng.gen_range(-self.mutation_rate, self.mutation_rate) / 10.;
+
+        new.clockstretch_1 *= 1. + rng.gen_range(-self.mutation_rate, self.mutation_rate);
+        new.clockstretch_2 *= 1. + rng.gen_range(-self.mutation_rate, self.mutation_rate);
         new
     }
 }
 
-const N_INPUTS: usize = 2;
+const N_INPUTS: usize = 4;
 
 /// stored as an array for easy
 /// neural network access.
@@ -174,12 +182,17 @@ struct Inputs {
 }
 
 impl Inputs {
-    //todo: add clocks as input
     pub fn sound_mut(&mut self) -> &mut f64 {
         &mut self.data[0]
     }
     pub fn smell_mut(&mut self) -> &mut f64 {
         &mut self.data[1]
+    }
+    pub fn clock1_mut(&mut self) -> &mut f64 {
+        &mut self.data[2]
+    }
+    pub fn clock2_mut(&mut self) -> &mut f64 {
+        &mut self.data[3]
     }
 }
 
@@ -328,7 +341,11 @@ impl App {
         self.gl.draw_end();
     }
 
+    // fixme: make sure dt is used literally on every change
     fn update<R: Rng>(&mut self, args: &UpdateArgs, mut rng: R) {
+        if args.dt > 0.3 {
+            println!("we are lagging, {} s/tick", args.dt);
+        }
         self.time += args.dt;
         // update the inputs
         // todo: don't clone here, keep two buffers and swap instead
@@ -363,18 +380,11 @@ impl App {
                     + (nb.status.vel[1] * nb.status.vel[1]).sqrt();
 
                 *inputs.sound_mut() += nb_sound / dist_squared;
-                if inputs.sound_mut().is_infinite() {
-                    dbg!(
-                        nb_sound,
-                        dist_squared,
-                        nb.status.vel,
-                        nb.status.pos,
-                        old.status.vel,
-                        old.status.pos,
-                    );
-                    panic!();
-                }
             }
+
+            // rust apparently does the modulo [-pi/2, pi/2] internally
+            *inputs.clock1_mut() = (self.time * old.genes.clockstretch_1).sin();
+            *inputs.clock2_mut() = (self.time * old.genes.clockstretch_2).sin();
 
             let gridpos = [
                 (new.status.pos[0] / 10.) as usize,
@@ -393,11 +403,7 @@ impl App {
             loop {
                 *inputs.smell_mut() = grid_value;
 
-                // fixme: make sure dt is used literally on every change
-
                 // inputs are processed at this point, time to feed the brain some data
-                // todo: rn this accesses the new input, not the old, maybe thats good
-                // maybe it needs to change
 
                 outputs = old.genes.brain.think(&inputs);
 

@@ -27,13 +27,15 @@ mod vecmath;
 use vecmath::Vector;
 
 mod brains;
-use brains::SimpleBrain;
+//use brains::SimpleBrain;
+use brains::BigBrain as SimpleBrain;
 
 const FOOD_WIDTH: usize = 50;
 const FOOD_HEIGHT: usize = 50;
 
 const LOCAL_ENV: f64 = 500.;
 const INITIAL_CELLS: usize = 200;
+const REPLACEMENT: usize = 20;
 
 const SIM_WIDTH: f64 = (FOOD_WIDTH * 10) as f64;
 const SIM_HEIGHT: f64 = (FOOD_HEIGHT * 10) as f64;
@@ -57,6 +59,7 @@ enum Selection {
     Age,
     Young,
     Spawns,
+    Generation,
 }
 
 impl Selection {
@@ -67,7 +70,8 @@ impl Selection {
             Selection::Bigboy => Selection::Age,
             Selection::Age => Selection::Young,
             Selection::Young => Selection::Spawns,
-            Selection::Spawns => Selection::None,
+            Selection::Spawns => Selection::Generation,
+            Selection::Generation => Selection::None,
         }
     }
 }
@@ -96,6 +100,7 @@ impl Blip {
                 food: 5.,
                 age: 0.,
                 children: 0,
+                generation: 0,
             },
             genes: Genes::new(&mut rng),
         }
@@ -104,8 +109,10 @@ impl Blip {
         self.status.hp /= 2.;
         self.status.children += 1;
         let mut new = self.clone();
+        new.status.generation += 1;
         new.status.food = 0.;
         new.status.age = 0.;
+        new.status.children = 0;
         new.status.vel[0] += 1.;
         new.status.vel[1] += 1.;
         //todo: request rng
@@ -125,6 +132,7 @@ struct Status {
     hp: f64,
     age: f64,
     children: usize,
+    generation: usize,
 }
 
 #[derive(Clone, PartialEq)]
@@ -139,7 +147,7 @@ impl Genes {
         Self {
             brain: SimpleBrain::init(&mut rng),
             mutation_rate: rng.gen_range(-0.001, 0.001) + 0.01,
-            repr_tres: rng.gen_range(-10., 10.) + 40.,
+            repr_tres: rng.gen_range(-10., 10.) + 100.,
         }
     }
     fn mutate<R: Rng>(&self, mut rng: R) -> Self {
@@ -188,7 +196,7 @@ impl Outputs {
         self.data[1]
     }
     pub fn speed(&self) -> f64 {
-        self.data[2] * 100.
+        self.data[2] * 1000.
     }
 }
 
@@ -273,6 +281,17 @@ impl App {
                     marker = Some(choice.0);
                 }
             }
+            Selection::Generation => {
+                let choice = self
+                    .blips
+                    .iter()
+                    .enumerate()
+                    .map(|(i, b)| (i, b.status.generation))
+                    .max_by(|a, b| a.1.cmp(&b.1));
+                if let Some(choice) = choice {
+                    marker = Some(choice.0);
+                }
+            }
         }
         for (index, blip) in self.blips.iter().enumerate() {
             let (px, py) = (blip.status.pos[0], blip.status.pos[1]);
@@ -289,10 +308,11 @@ impl App {
                 .filter(|d| d.position() != &[px, py]);
             let nb = search.next();
             if Some(index) == marker {
-                println!(
+                //todo: text-render those stats
+                /*println!(
                     "repr {}, chidlren: {}, hp: {}, food: {}",
                     blip.genes.repr_tres, blip.status.children, blip.status.hp, blip.status.food
-                );
+                );*/
                 polygon(PURPLE, TRI, transform.zoom(2.), gl);
             } else if nb.is_some() {
                 polygon(RED, TRI, transform, gl);
@@ -394,7 +414,7 @@ impl App {
 
             // use energy
 
-            let exhaustion = (0.1 + (outputs.speed().abs())) * args.dt * 0.1;
+            let exhaustion = (0.1 + (outputs.speed().abs() * 0.4)) * args.dt * 0.1;
             new.status.hp -= exhaustion;
 
             // reproduce & mutate
@@ -420,6 +440,10 @@ impl App {
             println!("{} deaths", before - after);
         }
 
+        if new.len() < REPLACEMENT {
+            new.push(Blip::new(&mut rng));
+        }
+
         self.blips = new;
 
         // add some food
@@ -427,7 +451,7 @@ impl App {
         if rng.gen_bool(args.dt) {
             let w: usize = rng.gen_range(0, FOOD_WIDTH);
             let h: usize = rng.gen_range(0, FOOD_HEIGHT);
-            let f: f64 = rng.gen_range(1., 2.);
+            let f: f64 = rng.gen_range(1., 4.);
             self.foodgrid[w][h] += f;
         }
 
@@ -514,7 +538,9 @@ fn main() {
         }
     }
 
-    let mut hurry = 1;
+    let mut hurry = 100;
+    let mut pause = false;
+    let mut hide = false;
 
     let mut events = Events::new(EventSettings::new());
     while let Some(e) = events.next(&mut window) {
@@ -538,13 +564,24 @@ fn main() {
                         println!("now running {} 0.02 updates per update", hurry);
                     }
                 }
-
                 input::Button::Keyboard(input::keyboard::Key::NumPadMinus) => {
                     if args.state == input::ButtonState::Release {
                         if hurry > 1 {
                             hurry -= 1;
                         }
                         println!("now running {} 0.02 updates per update", hurry);
+                    }
+                }
+                input::Button::Keyboard(input::keyboard::Key::Space) => {
+                    if args.state == input::ButtonState::Release {
+                        pause = !pause;
+                        println!("pausing {}", pause);
+                    }
+                }
+                input::Button::Keyboard(input::keyboard::Key::H) => {
+                    if args.state == input::ButtonState::Release {
+                        hide = !hide;
+                        println!("hiding rendering {}", pause);
                     }
                 }
                 input::Button::Keyboard(k) => {
@@ -556,15 +593,26 @@ fn main() {
             }
         }
         if let Some(args) = e.render_args() {
-            app.render(&args);
+            if !hide {
+                app.render(&args);
+            }
         }
 
         if let Some(args) = e.update_args() {
-            if hurry == 1 {
-                app.update(&args);
+            if pause {
             } else {
-                for _ in 0..hurry {
-                    app.update(&UpdateArgs { dt: 0.02 });
+                if hide {
+                    for _ in 0..1000 {
+                        app.update(&UpdateArgs { dt: 0.02 });
+                    }
+                } else {
+                    if hurry == 1 {
+                        app.update(&args);
+                    } else {
+                        for _ in 0..hurry {
+                            app.update(&UpdateArgs { dt: 0.02 });
+                        }
+                    }
                 }
             }
         }

@@ -13,6 +13,7 @@
 use opengl_graphics::{GlGraphics, OpenGL};
 use sdl2_window::Sdl2Window as Window;
 //use opengles_graphics::{GlGraphics, OpenGL};
+use input::mouse::MouseCursorEvent;
 use piston::event_loop::{EventSettings, Events};
 use piston::input;
 use piston::input::{ButtonEvent, RenderArgs, RenderEvent, UpdateArgs, UpdateEvent};
@@ -59,6 +60,7 @@ pub struct App {
     tree: RTree<BlipLoc>,
     selection: Selection,
     time: f64,
+    mousepos: [f64; 2],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -69,7 +71,7 @@ enum Selection {
     Young,
     Spawns,
     Generation,
-    //todo: add mouse selection
+    Mouse,
 }
 
 impl Selection {
@@ -81,7 +83,8 @@ impl Selection {
             Selection::Age => Selection::Young,
             Selection::Young => Selection::Spawns,
             Selection::Spawns => Selection::Generation,
-            Selection::Generation => Selection::None,
+            Selection::Generation => Selection::Mouse,
+            Selection::Mouse => Selection::None,
         }
     }
 }
@@ -319,6 +322,12 @@ impl App {
                 if let Some(choice) = choice {
                     marker = Some(choice.0);
                 }
+            }
+            Selection::Mouse => {
+                let sim_x = self.mousepos[0] * SIM_WIDTH / width;
+                let sim_y = self.mousepos[1] * SIM_HEIGHT / height;
+                let search = self.tree.nearest_neighbor(&[sim_x, sim_y]);
+                marker = search.map(|r| r.data);
             }
         }
         for (index, blip) in self.blips.iter().enumerate() {
@@ -605,6 +614,7 @@ fn main() {
         foodgrid,
         selection: Selection::None,
         time: 0.,
+        mousepos: [0.; 2],
     };
 
     let mut rng = rand::thread_rng();
@@ -680,6 +690,9 @@ fn main() {
                 input::Button::Controller(_) => (),
                 input::Button::Hat(_) => (),
             }
+        }
+        if let Some(args) = e.mouse_cursor_args() {
+            app.mousepos = args;
         }
         if let Some(args) = e.render_args() {
             if !hide {

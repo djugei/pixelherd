@@ -23,9 +23,11 @@ use rstar::RTree;
 
 use rand::Rng;
 
-//use rayon::prelude::{IndexedParallelIterator, ParallelIterator};
 use atomic::Atomic;
 use atomic::Ordering;
+use rayon::prelude::IndexedParallelIterator;
+use rayon::prelude::IntoParallelRefMutIterator;
+use rayon::prelude::ParallelIterator;
 
 mod vecmath;
 use vecmath::Vector;
@@ -53,6 +55,7 @@ pub struct App {
     foodgrid: [[Atomic<f64>; FOOD_HEIGHT]; FOOD_WIDTH],
     tree: RTree<BlipLoc>,
     selection: Selection,
+    time: f64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -326,15 +329,22 @@ impl App {
     }
 
     fn update<R: Rng>(&mut self, args: &UpdateArgs, mut rng: R) {
+        self.time += args.dt;
         // update the inputs
         // todo: don't clone here, keep two buffers and swap instead
         let mut new = self.blips.clone();
 
-        let mut spawns = Vec::new();
+        let spawns = std::sync::Mutex::new(Vec::new());
+
+        //perf: benchmarks if more cpu = more speed
+        let iter = new.par_iter_mut().zip(&self.blips);
+        //let iter = new.iter_mut().zip(&self.blips);
 
         // new is write only. if you need data from the last iteration
         // get it from old only.
-        for (new, old) in new.iter_mut().zip(self.blips.iter()) {
+        iter.for_each(|(new, old)| {
+            // todo: figure out how to pass rng into other threads
+            let mut rng = rand::thread_rng();
             let mut inputs: Inputs = Default::default();
 
             let search = self
@@ -372,12 +382,15 @@ impl App {
             ];
             let grid_slot = &self.foodgrid[gridpos[0]][gridpos[1]];
 
+            let casstat = Atomic::new(0usize);
+
+            // there is no synchronization between threads, only the global food object
+            // so only the atomic operaton on it needs to be taken care of.
+            // there is no other operations to synchronize
+            // relaxed ordering should therefore be fine to my best knowledge
             let mut grid_value = grid_slot.load(Ordering::Relaxed);
             let mut outputs;
             loop {
-                // there is no synchronization between threads, only the global food object
-                // so only the atomic operaton on it needs to be taken care of.
-                // there is no other operations to synchronize
                 *inputs.smell_mut() = grid_value;
 
                 // fixme: make sure dt is used literally on every change
@@ -388,25 +401,8 @@ impl App {
 
                 outputs = old.genes.brain.think(&inputs);
 
-                // now outputs are filled, time to act on them
-                let spike = new.status.spike + outputs.spike() / 2.;
-                new.status.spike = spike.min(1.).max(0.);
-
-                // change direction
-                const ORTHO: Vector = [0., 1.];
-                let steer = vecmath::scale(ORTHO, outputs.steering());
-                // fixme: handle 0 speed
-                let dir = vecmath::norm(old.status.vel);
-
-                let push = vecmath::rotate(steer, dir);
-
-                let mut vel = vecmath::add(old.status.vel, push);
-                // todo: be smarter about scaling speed, maybe do some log-stuff to simulate drag
-                vel = vecmath::norm(vel);
-                vel = vecmath::scale(vel, outputs.speed());
-                new.status.vel = vel;
-
                 // eat food
+                //todo: consider using actual speed, not acceleration
                 let speed = outputs.speed().abs();
                 let eating = (grid_value / speed.max(1.)) * args.dt;
                 if eating != 0. && !eating.is_nan() {
@@ -421,7 +417,8 @@ impl App {
                             new.status.food += eating;
                         }
                         Err(v) => {
-                            println!("{:?} had to reloop for cas", gridpos);
+                            //println!("{:?} had to reloop for cas", gridpos);
+                            casstat.fetch_add(1, Ordering::Relaxed);
                             grid_value = v;
                             continue;
                         }
@@ -429,9 +426,31 @@ impl App {
                 }
                 break;
             }
-            let digest = new.status.food.min(10. * args.dt);
+            let casstat = casstat.into_inner();
+            if casstat > 1 {
+                println!("[{}]: had to cas-loop {} times", self.time, casstat);
+            }
+            let digest = new.status.food.min(4. * args.dt);
             new.status.food -= digest;
             new.status.hp += digest;
+
+            // now outputs are filled, time to act on them
+            let spike = new.status.spike + outputs.spike() / 2.;
+            new.status.spike = spike.min(1.).max(0.);
+
+            // change direction
+            const ORTHO: Vector = [0., 1.];
+            let steer = vecmath::scale(ORTHO, outputs.steering());
+            // fixme: handle 0 speed
+            let dir = vecmath::norm(old.status.vel);
+
+            let push = vecmath::rotate(steer, dir);
+
+            let mut vel = vecmath::add(old.status.vel, push);
+            // todo: be smarter about scaling speed, maybe do some log-stuff to simulate drag
+            vel = vecmath::norm(vel);
+            vel = vecmath::scale(vel, outputs.speed());
+            new.status.vel = vel;
 
             // use energy
 
@@ -446,10 +465,13 @@ impl App {
             if new.status.hp > old.genes.repr_tres {
                 println!("new spawn!");
                 let spawn = new.split(&mut rng);
-                spawns.push(spawn);
+                let mut guard = spawns.lock().unwrap();
+                guard.push(spawn);
             }
             new.status.age += args.dt;
-        }
+        });
+
+        let spawns = spawns.into_inner().unwrap();
 
         new.extend(spawns);
         // todo: die, drop dead
@@ -549,9 +571,9 @@ fn main() {
         gl: GlGraphics::new(opengl),
         blips: Vec::with_capacity(INITIAL_CELLS),
         tree: RTree::new(),
-        //    foodgrid: [[Atomic::new(0.); FOOD_HEIGHT]; FOOD_WIDTH],
         foodgrid,
         selection: Selection::None,
+        time: 0.,
     };
 
     let mut rng = rand::thread_rng();

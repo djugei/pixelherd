@@ -26,6 +26,9 @@ use rand::Rng;
 mod vecmath;
 use vecmath::Vector;
 
+mod brains;
+use brains::SimpleBrain;
+
 const FOOD_WIDTH: usize = 50;
 const FOOD_HEIGHT: usize = 50;
 
@@ -34,12 +37,6 @@ const INITIAL_CELLS: usize = 200;
 
 const SIM_WIDTH: f64 = (FOOD_WIDTH * 10) as f64;
 const SIM_HEIGHT: f64 = (FOOD_HEIGHT * 10) as f64;
-
-//todo: this should be a (mutating) parameter of the individual blips
-const MUTATION_RATE: f64 = 0.01;
-
-//todo: should be per blip
-const REPR_TRES: f64 = 160.;
 
 type BlipLoc = PointWithData<usize, [f64; 2]>;
 
@@ -75,10 +72,7 @@ impl Selection {
     }
 }
 
-// todo: this needs to be split
-// outputs and inputs don't really need to be stored
-// status might have to be split into genes and status
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct Blip {
     /// things that change during the lifetime of a blip
     status: Status,
@@ -87,12 +81,33 @@ struct Blip {
 }
 
 impl Blip {
+    fn new<R: Rng>(mut rng: R) -> Self {
+        let x = rng.gen_range(0., SIM_WIDTH);
+        let y = rng.gen_range(0., SIM_HEIGHT);
+
+        let dx = rng.gen_range(-30., 30.);
+        let dy = rng.gen_range(-5., 5.);
+        Self {
+            status: Status {
+                pos: [x, y],
+                vel: [dx, dy],
+                spike: 0.,
+                hp: 25.,
+                food: 5.,
+                age: 0.,
+                children: 0,
+            },
+            genes: Genes::new(&mut rng),
+        }
+    }
     fn split(&mut self) -> Self {
         self.status.hp /= 2.;
         self.status.children += 1;
         let mut new = self.clone();
         new.status.food = 0.;
         new.status.age = 0.;
+        new.status.vel[0] += 1.;
+        new.status.vel[1] += 1.;
         //todo: request rng
         let mut rng = rand::thread_rng();
 
@@ -112,15 +127,26 @@ struct Status {
     children: usize,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct Genes {
     brain: SimpleBrain,
+    mutation_rate: f64,
+    repr_tres: f64,
 }
 
 impl Genes {
-    fn mutate<R: Rng>(&self, mut r: R) -> Self {
+    fn new<R: Rng>(mut rng: R) -> Self {
+        Self {
+            brain: SimpleBrain::init(&mut rng),
+            mutation_rate: rng.gen_range(-0.001, 0.001) + 0.01,
+            repr_tres: rng.gen_range(-10., 10.) + 40.,
+        }
+    }
+    fn mutate<R: Rng>(&self, mut rng: R) -> Self {
         let mut new = self.clone();
-        new.brain.mutate(&mut r);
+        let () = new.brain.mutate(&mut rng, self.mutation_rate);
+        new.repr_tres *= 1. + rng.gen_range(-self.mutation_rate, self.mutation_rate);
+        new.mutation_rate += rng.gen_range(-self.mutation_rate, self.mutation_rate) / 10.;
         new
     }
 }
@@ -130,7 +156,7 @@ const N_INPUTS: usize = 2;
 /// stored as an array for easy
 /// neural network access.
 /// but accessed/modified through methods
-#[derive(Clone, PartialEq, Default)]
+#[derive(Clone, PartialEq, Default, Debug)]
 struct Inputs {
     data: [f64; N_INPUTS],
 }
@@ -150,7 +176,7 @@ const N_OUTPUTS: usize = 4;
 /// stored as an array for easy
 /// neural network access.
 /// but accessed/modified through methods
-#[derive(Clone, PartialEq, Default)]
+#[derive(Clone, PartialEq, Default, Debug)]
 struct Outputs {
     data: [f64; N_OUTPUTS],
 }
@@ -162,7 +188,7 @@ impl Outputs {
         self.data[1]
     }
     pub fn speed(&self) -> f64 {
-        self.data[2]
+        self.data[2] * 100.
     }
 }
 
@@ -257,10 +283,16 @@ impl App {
                 .zoom(7.)
                 .orient(pdx, pdy)
                 .rot_deg(90.);
-            let mut search = self.tree.locate_within_distance([px, py], LOCAL_ENV);
-            let _ = search.next();
+            let mut search = self
+                .tree
+                .locate_within_distance([px, py], LOCAL_ENV)
+                .filter(|d| d.position() != &[px, py]);
             let nb = search.next();
             if Some(index) == marker {
+                println!(
+                    "repr {}, chidlren: {}, hp: {}, food: {}",
+                    blip.genes.repr_tres, blip.status.children, blip.status.hp, blip.status.food
+                );
                 polygon(PURPLE, TRI, transform.zoom(2.), gl);
             } else if nb.is_some() {
                 polygon(RED, TRI, transform, gl);
@@ -287,8 +319,10 @@ impl App {
         for (new, old) in new.iter_mut().zip(self.blips.iter()) {
             let mut inputs: Inputs = Default::default();
 
-            let mut search = self.tree.locate_within_distance(old.status.pos, LOCAL_ENV);
-            let _ = search.next();
+            let search = self
+                .tree
+                .locate_within_distance(old.status.pos, LOCAL_ENV)
+                .filter(|d| d.position() != &old.status.pos);
 
             for nb in search {
                 // sound
@@ -300,7 +334,18 @@ impl App {
                 let nb_sound = (nb.status.vel[0] * nb.status.vel[0])
                     + (nb.status.vel[1] * nb.status.vel[1]).sqrt();
 
-                *inputs.sound_mut() += nb_sound / dist_squared
+                *inputs.sound_mut() += nb_sound / dist_squared;
+                if inputs.sound_mut().is_infinite() {
+                    dbg!(
+                        nb_sound,
+                        dist_squared,
+                        nb.status.vel,
+                        nb.status.pos,
+                        old.status.vel,
+                        old.status.pos,
+                    );
+                    panic!();
+                }
             }
 
             let gridpos = [
@@ -317,8 +362,6 @@ impl App {
             // maybe it needs to change
 
             let outputs = old.genes.brain.think(&inputs);
-            // todo: maybe add some smoothing so outputs don't change instantly
-            // otherwise storing them in the blip is pointless
 
             // now outputs are filled, time to act on them
             let spike = new.status.spike + outputs.spike() / 2.;
@@ -327,6 +370,7 @@ impl App {
             // change direction
             const ORTHO: Vector = [0., 1.];
             let steer = vecmath::scale(ORTHO, outputs.steering());
+            // fixme: handle 0 speed
             let dir = vecmath::norm(old.status.vel);
 
             let push = vecmath::rotate(steer, dir);
@@ -334,11 +378,11 @@ impl App {
             let mut vel = vecmath::add(old.status.vel, push);
             // todo: be smarter about scaling speed, maybe do some log-stuff to simulate drag
             vel = vecmath::norm(vel);
-            vel = vecmath::scale(vel, outputs.speed() * 50.);
+            vel = vecmath::scale(vel, outputs.speed());
             new.status.vel = vel;
 
             // eat food
-            let speed = outputs.speed().abs() * 50.;
+            let speed = outputs.speed().abs();
             let eating = (*gridpos / speed.max(1.)) * args.dt;
             if eating != 0. && !eating.is_nan() {
                 *gridpos -= eating;
@@ -348,12 +392,17 @@ impl App {
             new.status.food -= digest;
             new.status.hp += digest;
 
+            // use energy
+
+            let exhaustion = (0.1 + (outputs.speed().abs())) * args.dt * 0.1;
+            new.status.hp -= exhaustion;
+
             // reproduce & mutate
             // reproduction is a bit of a problem since it needs to ad new entries to the vec
             // which is kinda bad for multithreading.
             // its a rather rare event though so its special-cased
 
-            if new.status.hp > REPR_TRES {
+            if new.status.hp > old.genes.repr_tres {
                 println!("new spawn!");
                 let spawn = new.split();
                 spawns.push(spawn);
@@ -364,15 +413,21 @@ impl App {
         new.extend(spawns);
         // todo: die, drop dead
 
+        let before = new.len();
+        new.retain(|blip| blip.status.hp > 0.);
+        let after = new.len();
+        if after < before {
+            println!("{} deaths", before - after);
+        }
+
         self.blips = new;
 
         // add some food
-        // fixme: if dt > 10 this needs to run multiple times
-        if rng.gen_bool(0.1 * args.dt) {
+        // fixme: if dt * factor > 1 this needs to run multiple times
+        if rng.gen_bool(args.dt) {
             let w: usize = rng.gen_range(0, FOOD_WIDTH);
             let h: usize = rng.gen_range(0, FOOD_HEIGHT);
             let f: f64 = rng.gen_range(1., 2.);
-
             self.foodgrid[w][h] += f;
         }
 
@@ -380,6 +435,11 @@ impl App {
         for blip in &mut self.blips {
             let pos = &mut blip.status.pos;
             let delta = &mut blip.status.vel;
+
+            if delta[0].is_nan() || delta[1].is_nan() {
+                dbg!(delta, pos);
+                panic!();
+            }
             pos[0] += delta[0] * args.dt;
             pos[1] += delta[1] * args.dt;
 
@@ -401,48 +461,19 @@ impl App {
             .blips
             .iter()
             .enumerate()
+            .inspect(|(_, b)| {
+                assert!(!b.status.pos[0].is_nan());
+                assert!(!b.status.pos[1].is_nan())
+            })
             .map(|(p, b)| BlipLoc::new(p, b.status.pos))
             .collect();
         self.tree = RTree::bulk_load(tree);
     }
 }
 
-#[derive(Copy, Clone, Default)]
-struct SimpleBrain {
-    // each output gets a weight for each input
-    weights: [[f64; N_INPUTS]; N_OUTPUTS],
-}
-impl SimpleBrain {
-    fn mutate<R: Rng>(&mut self, mut r: R) {
-        for out in &mut self.weights {
-            for inp in out.iter_mut() {
-                *inp += r.gen_range(-0.1, 0.1) * r.gen_range(0., MUTATION_RATE);
-                *inp *= 1. + (r.gen_range(-0.1, 0.1) * r.gen_range(0., MUTATION_RATE));
-            }
-        }
-    }
-}
-
-impl SimpleBrain {
-    fn init<R: Rng>(mut r: R) -> Self {
-        let mut s: Self = Default::default();
-        for out in &mut s.weights {
-            for inp in out.iter_mut() {
-                *inp = r.gen_range(-0.1, 0.1);
-            }
-        }
-        s
-    }
-    fn think(&self, inputs: &Inputs) -> Outputs {
-        let mut o: Outputs = Outputs::default();
-        for (iw, o) in self.weights.iter().zip(o.data.iter_mut()) {
-            let weighted_in: f64 = iw.iter().zip(&inputs.data).map(|(iw, i)| iw * i).sum();
-            let clamped = weighted_in.max(-20.).min(20.);
-            let res = 1. / (1. + (-clamped).exp());
-            *o = res;
-        }
-        o
-    }
+fn scaled_rand<R: Rng>(mut r: R, rate: f64, abs_scale: f64, mul_scale: f64, val: &mut f64) {
+    *val += r.gen_range(-abs_scale, abs_scale) * r.gen_range(0., rate);
+    *val *= 1. + (r.gen_range(-mul_scale, mul_scale) * r.gen_range(0., rate));
 }
 
 fn main() {
@@ -471,44 +502,57 @@ fn main() {
     let mut rng = rand::thread_rng();
 
     for _ in 0..INITIAL_CELLS {
-        let x = rng.gen_range(0., SIM_WIDTH);
-        let y = rng.gen_range(0., SIM_HEIGHT);
-
-        let dx = rng.gen_range(-30., 30.);
-        let dy = rng.gen_range(-5., 5.);
-        app.blips.push(Blip {
-            status: Status {
-                pos: [x, y],
-                vel: [dx, dy],
-                spike: 0.,
-                hp: 100.,
-                food: 50.,
-                age: 0.,
-                children: 0,
-            },
-            genes: Genes {
-                brain: SimpleBrain::init(&mut rng),
-            },
-        });
+        app.blips.push(Blip::new(&mut rng));
     }
 
     for w in 0..FOOD_WIDTH {
         for h in 0..FOOD_HEIGHT {
             //fixme: this should be an exponential distribution instead
-            if rng.gen_range(0, 10) == 1 {
+            if rng.gen_range(0, 3) == 1 {
                 app.foodgrid[w][h] = rng.gen_range(0., 10.);
             }
         }
     }
 
+    let mut hurry = 1;
+
     let mut events = Events::new(EventSettings::new());
     while let Some(e) = events.next(&mut window) {
         if let Some(args) = e.button_args() {
-            if args.button == input::Button::Keyboard(input::keyboard::Key::A)
-                && args.state == input::ButtonState::Release
-            {
-                app.selection = app.selection.next();
-                println!("now highlighting {:?}", app.selection);
+            match args.button {
+                input::Button::Keyboard(input::keyboard::Key::A) => {
+                    if args.state == input::ButtonState::Release {
+                        app.selection = app.selection.next();
+                        println!("now highlighting {:?}", app.selection);
+                    }
+                }
+                input::Button::Keyboard(input::keyboard::Key::S) => {
+                    if args.state == input::ButtonState::Release {
+                        println!("spawning new blip");
+                        app.blips.push(Blip::new(&mut rng));
+                    }
+                }
+                input::Button::Keyboard(input::keyboard::Key::NumPadPlus) => {
+                    if args.state == input::ButtonState::Release {
+                        hurry += 1;
+                        println!("now running {} 0.02 updates per update", hurry);
+                    }
+                }
+
+                input::Button::Keyboard(input::keyboard::Key::NumPadMinus) => {
+                    if args.state == input::ButtonState::Release {
+                        if hurry > 1 {
+                            hurry -= 1;
+                        }
+                        println!("now running {} 0.02 updates per update", hurry);
+                    }
+                }
+                input::Button::Keyboard(k) => {
+                    println!("unhandled keypress: {:?} ({:?})", k, args.button);
+                }
+                input::Button::Mouse(_) => (),
+                input::Button::Controller(_) => (),
+                input::Button::Hat(_) => (),
             }
         }
         if let Some(args) = e.render_args() {
@@ -516,7 +560,13 @@ fn main() {
         }
 
         if let Some(args) = e.update_args() {
-            app.update(&args);
+            if hurry == 1 {
+                app.update(&args);
+            } else {
+                for _ in 0..hurry {
+                    app.update(&UpdateArgs { dt: 0.02 });
+                }
+            }
         }
     }
 }

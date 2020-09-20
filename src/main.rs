@@ -29,6 +29,9 @@ use rayon::prelude::IndexedParallelIterator;
 use rayon::prelude::IntoParallelRefMutIterator;
 use rayon::prelude::ParallelIterator;
 
+#[allow(unused)]
+use inline_tweak::tweak;
+
 mod vecmath;
 use vecmath::Vector;
 
@@ -214,7 +217,9 @@ impl Outputs {
         self.data[1]
     }
     pub fn speed(&self) -> f64 {
-        self.data[2] * 1000.
+        // the exp is to undo the sigmoid from the nn, maybe i can output raws and do the
+        // sigmoid inline on the getters
+        self.data[2].exp() * 10.
     }
 }
 
@@ -421,14 +426,17 @@ impl App {
                 *inputs.smell_mut() = grid_value;
 
                 // inputs are processed at this point, time to feed the brain some data
-
                 outputs = old.genes.brain.think(&inputs);
 
                 // eat food
                 //todo: consider using actual speed, not acceleration
-                let speed = outputs.speed().abs();
+                //todo also this needs to be finetuned quite a bit in paralel with food spawning and
+                //movement speed, rn they are very very slow in general and just zoom over food,
+                //fully consuming it
+                let speed = outputs.speed() * tweak!(1.);
+                // eat at most half the field/second
                 let eating = (grid_value / speed.max(1.)) * args.dt;
-                if eating != 0. && !eating.is_nan() {
+                if eating > 0. && !eating.is_nan() {
                     let newval = grid_value - eating;
                     match grid_slot.compare_exchange(
                         grid_value,

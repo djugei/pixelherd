@@ -1,7 +1,9 @@
 #![allow(unused)]
 use crate::scaled_rand;
-use crate::{N_INPUTS, N_OUTPUTS};
 use rand::Rng;
+const N_INPUTS: usize = 4;
+const N_OUTPUTS: usize = 6;
+
 const INNER_SIZE: usize = (N_INPUTS + N_OUTPUTS) / 2;
 
 /// stored as an array for easy
@@ -45,6 +47,16 @@ impl Outputs {
         // the exp is to undo the sigmoid from the nn, maybe i can output raws and do the
         // sigmoid inline on the getters
         self.data[2].exp()
+    }
+    // would be nice if there was an easy way to return &[f64;3] split of from the main array
+    pub fn r(&self) -> f64 {
+        self.data[3] + 0.5
+    }
+    pub fn b(&self) -> f64 {
+        self.data[4] + 0.5
+    }
+    pub fn g(&self) -> f64 {
+        self.data[5] + 0.5
     }
 }
 

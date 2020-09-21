@@ -25,7 +25,6 @@ use rstar::RTree;
 use rand::Rng;
 
 use atomic::Atomic;
-use atomic::Ordering;
 use rayon::prelude::IndexedParallelIterator;
 use rayon::prelude::IntoParallelRefMutIterator;
 use rayon::prelude::ParallelIterator;
@@ -34,11 +33,9 @@ use rayon::prelude::ParallelIterator;
 use inline_tweak::tweak;
 
 mod vecmath;
-use vecmath::Vector;
 
 mod brains;
 use brains::BigBrain;
-use brains::Brain;
 
 mod blip;
 use blip::Blip;
@@ -57,20 +54,18 @@ const SIM_WIDTH: f64 = (FOOD_WIDTH * 10) as f64;
 const SIM_HEIGHT: f64 = (FOOD_HEIGHT * 10) as f64;
 
 type BlipLoc = PointWithData<usize, [f64; 2]>;
+type FoodGrid = [[Atomic<f64>; FOOD_HEIGHT]; FOOD_WIDTH];
 
 pub struct App {
     gl: GlGraphics, // OpenGL drawing backend.
     blips: Vec<Blip<BigBrain>>,
     // this probably needs to be atomic u64
-    foodgrid: [[Atomic<f64>; FOOD_HEIGHT]; FOOD_WIDTH],
+    foodgrid: FoodGrid,
     tree: RTree<BlipLoc>,
     selection: Selection,
     time: f64,
     mousepos: [f64; 2],
 }
-
-const N_INPUTS: usize = 4;
-const N_OUTPUTS: usize = 4;
 
 impl App {
     fn render<C>(&mut self, args: &RenderArgs, glyph_cache: &mut C)
@@ -83,10 +78,10 @@ impl App {
         const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
         const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
         //const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
-        const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
-        const BLUE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+        //const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
+        //const BLUE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
 
-        const PURPLE: [f32; 4] = [1.0, 0.0, 1.0, 1.0];
+        //const PURPLE: [f32; 4] = [1.0, 0.0, 1.0, 1.0];
 
         const TRI: types::Polygon = &[[-0.5, 0.], [0., -2.], [0.5, 0.]];
         const SQR: types::Rectangle = [0., 0., 1., 1.];
@@ -123,13 +118,8 @@ impl App {
                 .transform
                 .trans(px / SIM_WIDTH * width, py / SIM_HEIGHT * height);
             let transform = pos_transform.zoom(7.).orient(pdx, pdy).rot_deg(90.);
-            let mut search = self
-                .tree
-                .locate_within_distance([px, py], LOCAL_ENV)
-                .filter(|d| d.position() != &[px, py]);
-            let nb = search.next();
             if Some(index) == marker {
-                polygon(PURPLE, TRI, transform.zoom(2.), gl);
+                polygon(blip.status.rgb, TRI, transform.zoom(2.), gl);
 
                 let display = format!(
                     "children: {}\nhp: {:.2}\ngeneration: {}\nage: {:.2}",
@@ -148,10 +138,8 @@ impl App {
                     )
                     .unwrap();
                 }
-            } else if nb.is_some() {
-                polygon(RED, TRI, transform, gl);
             } else {
-                polygon(BLUE, TRI, transform, gl);
+                polygon(blip.status.rgb, TRI, transform, gl);
             }
         }
 
@@ -179,129 +167,26 @@ impl App {
         iter.for_each(|(new, old)| {
             // todo: figure out how to pass rng into other threads
             let mut rng = rand::thread_rng();
-            let mut inputs: brains::Inputs = Default::default();
-
-            let search = self
-                .tree
-                .locate_within_distance(old.status.pos, LOCAL_ENV)
-                .filter(|d| d.position() != &old.status.pos);
-
-            for nb in search {
-                // sound
-                let nb = &self.blips[nb.data];
-                use rstar::PointDistance;
-                let dist_squared = PointDistance::distance_2(&old.status.pos, &nb.status.pos);
-
-                // todo: get rid of sqrt
-                let nb_sound = (nb.status.vel[0] * nb.status.vel[0])
-                    + (nb.status.vel[1] * nb.status.vel[1]).sqrt();
-
-                *inputs.sound_mut() += nb_sound / dist_squared;
-            }
-
-            // rust apparently does the modulo [-pi/2, pi/2] internally
-            *inputs.clock1_mut() = (self.time * old.genes.clockstretch_1).sin();
-            *inputs.clock2_mut() = (self.time * old.genes.clockstretch_2).sin();
-
-            let gridpos = [
-                (new.status.pos[0] / 10.) as usize,
-                (new.status.pos[1] / 10.) as usize,
-            ];
-            let grid_slot = &self.foodgrid[gridpos[0]][gridpos[1]];
-
-            let casstat = Atomic::new(0usize);
-
-            // there is no synchronization between threads, only the global food object
-            // so only the atomic operaton on it needs to be taken care of.
-            // there is no other operations to synchronize
-            // relaxed ordering should therefore be fine to my best knowledge
-            let mut grid_value = grid_slot.load(Ordering::Relaxed);
-            let mut outputs;
-            loop {
-                *inputs.smell_mut() = grid_value;
-
-                // inputs are processed at this point, time to feed the brain some data
-                outputs = old.genes.brain.think(&inputs);
-
-                // eat food
-                //todo: consider using actual speed, not acceleration
-                //todo also this needs to be finetuned quite a bit in paralel with food spawning and
-                //movement speed, rn they are very very slow in general and just zoom over food,
-                //fully consuming it
-                let speed = outputs.speed() * tweak!(1.);
-                // eat at most half the field/second
-                let eating = (grid_value / speed.max(1.)) * args.dt;
-                if eating > 0. && !eating.is_nan() {
-                    let newval = grid_value - eating;
-                    match grid_slot.compare_exchange(
-                        grid_value,
-                        newval,
-                        Ordering::Relaxed,
-                        Ordering::Relaxed,
-                    ) {
-                        Ok(_) => {
-                            new.status.food += eating;
-                        }
-                        Err(v) => {
-                            //println!("{:?} had to reloop for cas", gridpos);
-                            casstat.fetch_add(1, Ordering::Relaxed);
-                            grid_value = v;
-                            continue;
-                        }
-                    }
-                }
-                break;
-            }
-            let casstat = casstat.into_inner();
-            if casstat > 1 {
-                println!("[{}]: had to cas-loop {} times", self.time, casstat);
-            }
-            let digest = new.status.food.min(4. * args.dt);
-            new.status.food -= digest;
-            new.status.hp += digest;
-
-            // now outputs are filled, time to act on them
-            let spike = new.status.spike + outputs.spike() / 2.;
-            new.status.spike = spike.min(1.).max(0.);
-
-            // change direction
-            const ORTHO: Vector = [0., 1.];
-            let steer = vecmath::scale(ORTHO, outputs.steering());
-            // fixme: handle 0 speed
-            let dir = vecmath::norm(old.status.vel);
-
-            let push = vecmath::rotate(steer, dir);
-
-            let mut vel = vecmath::add(old.status.vel, push);
-            // todo: be smarter about scaling speed, maybe do some log-stuff to simulate drag
-            vel = vecmath::norm(vel);
-            vel = vecmath::scale(vel, outputs.speed());
-            new.status.vel = vel;
-
-            // use energy
-
-            let exhaustion = (0.1 + (outputs.speed().abs() * 0.4)) * args.dt * 0.1;
-            new.status.hp -= exhaustion;
-
-            // reproduce & mutate
-            // reproduction is a bit of a problem since it needs to ad new entries to the vec
-            // which is kinda bad for multithreading.
-            // its a rather rare event though so its special-cased
-
-            if new.status.hp > old.genes.repr_tres {
-                println!("new spawn!");
-                let spawn = new.split(&mut rng);
+            let spawn = new.update(
+                &mut rng,
+                old,
+                &self.blips,
+                &self.tree,
+                &self.foodgrid,
+                self.time,
+                args.dt,
+            );
+            if let Some(spawn) = spawn {
                 let mut guard = spawns.lock().unwrap();
                 guard.push(spawn);
             }
-            new.status.age += args.dt;
         });
 
         let spawns = spawns.into_inner().unwrap();
 
         new.extend(spawns);
-        // todo: die, drop dead
 
+        // todo: drop some meat on death
         let before = new.len();
         new.retain(|blip| blip.status.hp > 0.);
         let after = new.len();
@@ -325,27 +210,8 @@ impl App {
         }
 
         // move blips
-        for blip in &mut self.blips {
-            let pos = &mut blip.status.pos;
-            let delta = &mut blip.status.vel;
-
-            if delta[0].is_nan() || delta[1].is_nan() {
-                dbg!(delta, pos);
-                panic!();
-            }
-            pos[0] += delta[0] * args.dt;
-            pos[1] += delta[1] * args.dt;
-
-            pos[0] %= SIM_WIDTH;
-            pos[1] %= SIM_HEIGHT;
-
-            if pos[0] < 0. {
-                pos[0] += SIM_WIDTH
-            };
-            if pos[1] < 0. {
-                pos[1] += SIM_WIDTH
-            };
-        }
+        let iter = self.blips.par_iter_mut();
+        iter.for_each(|blip| blip.motion(args.dt));
 
         // update tree
         // todo: maybe this can be done smarter, instead of completely

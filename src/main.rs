@@ -43,6 +43,9 @@ use brains::Brain;
 mod blip;
 use blip::Blip;
 
+mod select;
+use select::Selection;
+
 const FOOD_WIDTH: usize = 50;
 const FOOD_HEIGHT: usize = 50;
 
@@ -64,32 +67,6 @@ pub struct App {
     selection: Selection,
     time: f64,
     mousepos: [f64; 2],
-}
-
-#[derive(Clone, Copy, Debug)]
-enum Selection {
-    None,
-    Bigboy,
-    Age,
-    Young,
-    Spawns,
-    Generation,
-    Mouse,
-}
-
-impl Selection {
-    // todo: add pre
-    fn next(self) -> Self {
-        match self {
-            Selection::None => Selection::Bigboy,
-            Selection::Bigboy => Selection::Age,
-            Selection::Age => Selection::Young,
-            Selection::Young => Selection::Spawns,
-            Selection::Spawns => Selection::Generation,
-            Selection::Generation => Selection::Mouse,
-            Selection::Mouse => Selection::None,
-        }
-    }
 }
 
 const N_INPUTS: usize = 4;
@@ -134,71 +111,11 @@ impl App {
                 rectangle([0.0, 1.0, 0.0, trans as f32], SQR, transform, gl);
             }
         }
-        let mut marker = None;
-        match self.selection {
-            Selection::None => marker = None,
-            Selection::Bigboy => {
-                let choice = self
-                    .blips
-                    .iter()
-                    .enumerate()
-                    .map(|(i, b)| (i, b.status.hp + b.status.food))
-                    .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-                if let Some(choice) = choice {
-                    marker = Some(choice.0);
-                }
-            }
-            Selection::Age => {
-                let choice = self
-                    .blips
-                    .iter()
-                    .enumerate()
-                    .map(|(i, b)| (i, b.status.age))
-                    .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-                if let Some(choice) = choice {
-                    marker = Some(choice.0);
-                }
-            }
-            Selection::Young => {
-                let choice = self
-                    .blips
-                    .iter()
-                    .enumerate()
-                    .map(|(i, b)| (i, b.status.age))
-                    .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-                if let Some(choice) = choice {
-                    marker = Some(choice.0);
-                }
-            }
-            Selection::Spawns => {
-                let choice = self
-                    .blips
-                    .iter()
-                    .enumerate()
-                    .map(|(i, b)| (i, b.status.children))
-                    .max_by(|a, b| a.1.cmp(&b.1));
-                if let Some(choice) = choice {
-                    marker = Some(choice.0);
-                }
-            }
-            Selection::Generation => {
-                let choice = self
-                    .blips
-                    .iter()
-                    .enumerate()
-                    .map(|(i, b)| (i, b.status.generation))
-                    .max_by(|a, b| a.1.cmp(&b.1));
-                if let Some(choice) = choice {
-                    marker = Some(choice.0);
-                }
-            }
-            Selection::Mouse => {
-                let sim_x = self.mousepos[0] * SIM_WIDTH / width;
-                let sim_y = self.mousepos[1] * SIM_HEIGHT / height;
-                let search = self.tree.nearest_neighbor(&[sim_x, sim_y]);
-                marker = search.map(|r| r.data);
-            }
-        }
+        let sim_x = self.mousepos[0] * SIM_WIDTH / width;
+        let sim_y = self.mousepos[1] * SIM_HEIGHT / height;
+        let marker = self
+            .selection
+            .select(&self.blips, &self.tree, &[sim_x, sim_y]);
         for (index, blip) in self.blips.iter().enumerate() {
             let (px, py) = (blip.status.pos[0], blip.status.pos[1]);
             let (pdx, pdy) = (blip.status.vel[0], blip.status.vel[1]);
@@ -481,7 +398,7 @@ fn main() {
         blips: Vec::with_capacity(INITIAL_CELLS),
         tree: RTree::new(),
         foodgrid,
-        selection: Selection::None,
+        selection: Selection::new(),
         time: 0.,
         mousepos: [0.; 2],
     };

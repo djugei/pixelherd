@@ -37,8 +37,11 @@ mod vecmath;
 use vecmath::Vector;
 
 mod brains;
-//use brains::SimpleBrain;
-use brains::BigBrain as SimpleBrain;
+use brains::BigBrain;
+use brains::Brain;
+
+mod blip;
+use blip::Blip;
 
 const FOOD_WIDTH: usize = 50;
 const FOOD_HEIGHT: usize = 50;
@@ -54,7 +57,7 @@ type BlipLoc = PointWithData<usize, [f64; 2]>;
 
 pub struct App {
     gl: GlGraphics, // OpenGL drawing backend.
-    blips: Vec<Blip>,
+    blips: Vec<Blip<BigBrain>>,
     // this probably needs to be atomic u64
     foodgrid: [[Atomic<f64>; FOOD_HEIGHT]; FOOD_WIDTH],
     tree: RTree<BlipLoc>,
@@ -89,142 +92,8 @@ impl Selection {
     }
 }
 
-#[derive(Clone, PartialEq)]
-struct Blip {
-    /// things that change during the lifetime of a blip
-    status: Status,
-    /// things that only change trough mutation during reproduction
-    genes: Genes,
-}
-
-impl Blip {
-    fn new<R: Rng>(mut rng: R) -> Self {
-        let x = rng.gen_range(0., SIM_WIDTH);
-        let y = rng.gen_range(0., SIM_HEIGHT);
-
-        let dx = rng.gen_range(-30., 30.);
-        let dy = rng.gen_range(-5., 5.);
-        Self {
-            status: Status {
-                pos: [x, y],
-                vel: [dx, dy],
-                spike: 0.,
-                hp: 25.,
-                food: 5.,
-                age: 0.,
-                children: 0,
-                generation: 0,
-            },
-            genes: Genes::new(&mut rng),
-        }
-    }
-    fn split<R: Rng>(&mut self, mut rng: R) -> Self {
-        self.status.hp /= 2.;
-        self.status.children += 1;
-        let mut new = self.clone();
-        new.status.generation += 1;
-        new.status.food = 0.;
-        new.status.age = 0.;
-        new.status.children = 0;
-        new.status.vel[0] += 1.;
-        new.status.vel[1] += 1.;
-
-        new.genes.mutate(&mut rng);
-        new
-    }
-}
-
-#[derive(Clone, PartialEq, Default)]
-struct Status {
-    pos: [f64; 2],
-    vel: [f64; 2],
-    spike: f64,
-    food: f64,
-    hp: f64,
-    age: f64,
-    children: usize,
-    generation: usize,
-}
-
-#[derive(Clone, PartialEq)]
-struct Genes {
-    brain: SimpleBrain,
-    mutation_rate: f64,
-    repr_tres: f64,
-    // actual clock is multiplied by this
-    clockstretch_1: f64,
-    clockstretch_2: f64,
-}
-
-impl Genes {
-    fn new<R: Rng>(mut rng: R) -> Self {
-        Self {
-            brain: SimpleBrain::init(&mut rng),
-            mutation_rate: rng.gen_range(-0.001, 0.001) + 0.01,
-            repr_tres: rng.gen_range(-10., 10.) + 100.,
-            clockstretch_1: rng.gen_range(0.01, 1.),
-            clockstretch_2: rng.gen_range(0.01, 1.),
-        }
-    }
-    fn mutate<R: Rng>(&self, mut rng: R) -> Self {
-        let mut new = self.clone();
-        let () = new.brain.mutate(&mut rng, self.mutation_rate);
-        new.repr_tres *= 1. + rng.gen_range(-self.mutation_rate, self.mutation_rate);
-        new.mutation_rate += rng.gen_range(-self.mutation_rate, self.mutation_rate) / 10.;
-
-        new.clockstretch_1 *= 1. + rng.gen_range(-self.mutation_rate, self.mutation_rate);
-        new.clockstretch_2 *= 1. + rng.gen_range(-self.mutation_rate, self.mutation_rate);
-        new
-    }
-}
-
 const N_INPUTS: usize = 4;
-
-/// stored as an array for easy
-/// neural network access.
-/// but accessed/modified through methods
-#[derive(Clone, PartialEq, Default, Debug)]
-struct Inputs {
-    data: [f64; N_INPUTS],
-}
-
-impl Inputs {
-    pub fn sound_mut(&mut self) -> &mut f64 {
-        &mut self.data[0]
-    }
-    pub fn smell_mut(&mut self) -> &mut f64 {
-        &mut self.data[1]
-    }
-    pub fn clock1_mut(&mut self) -> &mut f64 {
-        &mut self.data[2]
-    }
-    pub fn clock2_mut(&mut self) -> &mut f64 {
-        &mut self.data[3]
-    }
-}
-
 const N_OUTPUTS: usize = 4;
-
-/// stored as an array for easy
-/// neural network access.
-/// but accessed/modified through methods
-#[derive(Clone, PartialEq, Default, Debug)]
-struct Outputs {
-    data: [f64; N_OUTPUTS],
-}
-impl Outputs {
-    pub fn spike(&self) -> f64 {
-        self.data[0]
-    }
-    pub fn steering(&self) -> f64 {
-        self.data[1]
-    }
-    pub fn speed(&self) -> f64 {
-        // the exp is to undo the sigmoid from the nn, maybe i can output raws and do the
-        // sigmoid inline on the getters
-        self.data[2].exp() * 10.
-    }
-}
 
 impl App {
     fn render<C>(&mut self, args: &RenderArgs, glyph_cache: &mut C)
@@ -393,7 +262,7 @@ impl App {
         iter.for_each(|(new, old)| {
             // todo: figure out how to pass rng into other threads
             let mut rng = rand::thread_rng();
-            let mut inputs: Inputs = Default::default();
+            let mut inputs: brains::Inputs = Default::default();
 
             let search = self
                 .tree

@@ -1,5 +1,5 @@
 [package]
-name = "scriptsbots-rs"
+name = "pixelherd"
 version = "0.1.0"
 authors = ["djugei <ddjugei@gmail.com>"]
 edition = "2018"

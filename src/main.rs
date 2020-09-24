@@ -59,7 +59,7 @@ use select::Selection;
 const FOOD_WIDTH: usize = 50;
 const FOOD_HEIGHT: usize = 50;
 
-const LOCAL_ENV: f64 = 500.;
+const LOCAL_ENV: f64 = 1500.;
 const INITIAL_CELLS: usize = 100;
 const REPLACEMENT: usize = 20;
 
@@ -165,6 +165,29 @@ impl App {
             let transform = pos_transform.orient(pdx, pdy).rot_deg(90.);
             if Some(index) == marker {
                 polygon(blip.status.rgb, TRI, transform.zoom(2.), gl);
+
+                // vel is always normed
+                let base_angle = vecmath::angle(blip.status.vel);
+
+                let search = self
+                    .tree
+                    .locate_within_distance(blip.status.pos, LOCAL_ENV)
+                    .filter(|d| d.position() != &blip.status.pos)
+                    .map(|d| {
+                        let diff = vecmath::sub(*d.position(), blip.status.pos);
+                        let diff = vecmath::norm(diff);
+                        let angle = vecmath::angle(diff);
+                        ((base_angle - angle).abs(), d.position())
+                    })
+                    .filter(|(a, _)| a.abs() < 1.);
+
+                for (_, p) in search {
+                    const RECT: [f64; 4] = [-5., -5., 10., 10.];
+                    let t = c
+                        .transform
+                        .trans(p[0] / SIM_WIDTH * width, p[1] / SIM_HEIGHT * height);
+                    ellipse(RED, RECT, t, gl);
+                }
 
                 let display = format!(
                     "children: {}\nhp: {:.2}\ngeneration: {}\nage: {:.2}",

@@ -69,13 +69,20 @@ pub fn scale(mut a: Vector, scalar: f64) -> Vector {
 }
 
 /// relative angle, in radians, range -pi - pi
-fn angle(base: Vector, other: Vector) -> f64 {
+#[allow(unused)]
+pub fn angle_between(base: Vector, other: Vector) -> f64 {
     let delta = sub(other, base);
+    let n = norm(delta);
+    angle(n)
+}
 
-    let len = len(delta);
-    let x = delta[0] / len;
+/// angle on the unit cirle, input needs to be normalize
+/// otherwise you get NaNs
+/// to be more precize actually only the x component has to be normalized
+pub fn angle(norm: Vector) -> f64 {
+    let x = norm[0];
     let rad = x.asin();
-    let ypos = delta[1].is_sign_positive();
+    let ypos = norm[1].is_sign_positive();
 
     // fixme: this feels insanely ugly
     if ypos {
@@ -95,7 +102,7 @@ fn angle_test() {
         let pinum = num * pi;
         let (x, y) = pinum.sin_cos();
 
-        let a = angle([0., 0.], [x, y]);
+        let a = angle([x, y]);
 
         let d = (pinum - a).abs();
         assert!(

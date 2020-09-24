@@ -43,6 +43,19 @@ use blip::Blip;
 mod select;
 use select::Selection;
 
+// coordinates:
+// [width, height] <=> [x, y]
+//
+//        ^
+//       -h
+//
+// <- -w  *  +w ->
+//
+//       +h
+//        v
+//
+// so height is actually "depth"
+
 const FOOD_WIDTH: usize = 50;
 const FOOD_HEIGHT: usize = 50;
 
@@ -66,6 +79,38 @@ pub struct App {
     time: f64,
     mousepos: [f64; 2],
 }
+/// displays multiline text
+use graphics::types::Matrix2d;
+fn display_text<C, G>(
+    text: &str,
+    glyph_cache: &mut C,
+    // the left upper corner
+    basetrans: Matrix2d,
+    colour: [f32; 4],
+    size: usize,
+    graphics: &mut G,
+) -> Result<(), <C as graphics::character::CharacterCache>::Error>
+where
+    G: graphics::Graphics,
+    C: graphics::character::CharacterCache<Texture = G::Texture>,
+    <C as graphics::character::CharacterCache>::Error: std::fmt::Debug,
+{
+    let basetrans = basetrans.trans(0., size as f64);
+    use graphics::Transformed;
+    text.split('\n')
+        .enumerate()
+        .map(|(idx, txt)| {
+            graphics::text(
+                colour,
+                size as u32,
+                txt,
+                glyph_cache,
+                basetrans.trans(0., (size * idx) as f64),
+                graphics,
+            )
+        })
+        .collect()
+}
 
 impl App {
     fn render<C>(&mut self, args: &RenderArgs, glyph_cache: &mut C)
@@ -78,12 +123,12 @@ impl App {
         const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
         const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
         //const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
-        //const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
+        const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
         //const BLUE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
 
         //const PURPLE: [f32; 4] = [1.0, 0.0, 1.0, 1.0];
 
-        const TRI: types::Polygon = &[[-0.5, 0.], [0., -2.], [0.5, 0.]];
+        const TRI: types::Polygon = &[[-5., 0.], [0., -20.], [5., 0.]];
         const SQR: types::Rectangle = [0., 0., 1., 1.];
 
         let (width, height) = (args.window_size[0], args.window_size[1]);
@@ -117,7 +162,7 @@ impl App {
             let pos_transform = c
                 .transform
                 .trans(px / SIM_WIDTH * width, py / SIM_HEIGHT * height);
-            let transform = pos_transform.zoom(7.).orient(pdx, pdy).rot_deg(90.);
+            let transform = pos_transform.orient(pdx, pdy).rot_deg(90.);
             if Some(index) == marker {
                 polygon(blip.status.rgb, TRI, transform.zoom(2.), gl);
 
@@ -126,20 +171,20 @@ impl App {
                     blip.status.children, blip.status.hp, blip.status.generation, blip.status.age,
                 );
                 let size = 20_usize;
-
-                for (idx, txt) in display.split('\n').enumerate() {
-                    text(
-                        BLACK,
-                        size as u32,
-                        txt,
-                        glyph_cache,
-                        pos_transform.trans(0., (size * idx) as f64),
-                        gl,
-                    )
-                    .unwrap();
-                }
+                display_text(&display, glyph_cache, pos_transform, BLACK, size, gl).unwrap();
             } else {
                 polygon(blip.status.rgb, TRI, transform, gl);
+            }
+            if blip.status.spike > 0.3 {
+                let start = -20. * (2. / 3.);
+                line_from_to(
+                    RED,
+                    1.2,
+                    [0., start],
+                    [0., start - (blip.status.spike * 10.)],
+                    transform,
+                    gl,
+                );
             }
         }
 

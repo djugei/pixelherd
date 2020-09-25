@@ -251,29 +251,62 @@ pub struct Genes<B: Brain> {
     // actual clock is multiplied by this
     pub clockstretch_1: f64,
     pub clockstretch_2: f64,
+    // 3 eyes, each represented by an angle in radians [-pi-pi]
+    pub eyes: [f64; 3],
 }
 
 impl<B: Brain> Genes<B> {
     fn new<R: Rng>(mut rng: R) -> Self {
+        use std::f64::consts::PI;
         Self {
             brain: B::init(&mut rng),
             mutation_rate: rng.gen_range(-0.001, 0.001) + 0.01,
             repr_tres: rng.gen_range(-10., 10.) + 100.,
             clockstretch_1: rng.gen_range(0.01, 1.),
             clockstretch_2: rng.gen_range(0.01, 1.),
+            eyes: [
+                rng.gen_range(-PI, PI),
+                rng.gen_range(-PI, PI),
+                rng.gen_range(-PI, PI),
+            ],
+            //eyes: [(-2. / 3.) * PI, 0., (2. / 3.) * PI],
+            //eyes: [0., 0., 0.],
         }
     }
+
     fn mutate<R: Rng>(&self, mut rng: R) -> Self
     where
         B: Copy,
     {
-        let mut new = self.clone();
-        new.brain.mutate(&mut rng, self.mutation_rate);
-        new.repr_tres *= 1. + rng.gen_range(-self.mutation_rate, self.mutation_rate);
-        new.mutation_rate += rng.gen_range(-self.mutation_rate, self.mutation_rate) / 10.;
+        //let mut new = self.clone();
+        let mut brain = self.brain.clone();
+        brain.mutate(&mut rng, self.mutation_rate);
 
-        new.clockstretch_1 *= 1. + rng.gen_range(-self.mutation_rate, self.mutation_rate);
-        new.clockstretch_2 *= 1. + rng.gen_range(-self.mutation_rate, self.mutation_rate);
-        new
+        let repr_tres =
+            self.repr_tres * (1. + rng.gen_range(-self.mutation_rate, self.mutation_rate));
+
+        let mutation_rate =
+            self.mutation_rate + (rng.gen_range(-self.mutation_rate, self.mutation_rate) / 10.);
+
+        let clockstretch_1 =
+            self.clockstretch_1 * (1. + rng.gen_range(-self.mutation_rate, self.mutation_rate));
+        let clockstretch_2 =
+            self.clockstretch_2 * (1. + rng.gen_range(-self.mutation_rate, self.mutation_rate));
+
+        use std::f64::consts::PI;
+        let mut eyes = self.eyes.clone();
+        for eye in eyes.iter_mut() {
+            *eye += rng.gen_range(-self.mutation_rate * PI, self.mutation_rate * PI);
+            // wrap around
+            *eye %= PI;
+        }
+        Self {
+            brain,
+            repr_tres,
+            mutation_rate,
+            clockstretch_1,
+            clockstretch_2,
+            eyes,
+        }
     }
 }

@@ -122,9 +122,9 @@ impl App {
 
         const WHITE: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
         const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
-        //const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
         const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
-        //const BLUE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+        const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
+        const BLUE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
 
         //const PURPLE: [f32; 4] = [1.0, 0.0, 1.0, 1.0];
 
@@ -166,32 +166,58 @@ impl App {
             if Some(index) == marker {
                 polygon(blip.status.rgb, TRI, transform.zoom(2.), gl);
 
-                // vel is always normed
-                let base_angle = vecmath::angle(blip.status.vel);
+                let base_angle = vecmath::atan2(vecmath::norm(blip.status.vel));
 
                 let search = self
                     .tree
                     .locate_within_distance(blip.status.pos, LOCAL_ENV)
                     .filter(|d| d.position() != &blip.status.pos)
+                    .map(|d| *d.position())
                     .map(|d| {
-                        let diff = vecmath::sub(*d.position(), blip.status.pos);
+                        let diff = vecmath::sub(d, blip.status.pos);
                         let diff = vecmath::norm(diff);
-                        let angle = vecmath::angle(diff);
-                        ((base_angle - angle).abs(), d.position())
+                        let angle = vecmath::atan2(diff);
+                        (angle, d)
                     })
-                    .filter(|(a, _)| a.abs() < 1.);
+                    .collect::<Vec<_>>();
 
-                for (_, p) in search {
-                    const RECT: [f64; 4] = [-5., -5., 10., 10.];
-                    let t = c
-                        .transform
-                        .trans(p[0] / SIM_WIDTH * width, p[1] / SIM_HEIGHT * height);
-                    ellipse(RED, RECT, t, gl);
+                const RECT: [f64; 4] = [-5., -5., 10., 10.];
+                use std::f64::consts::PI;
+                let col = [RED, GREEN, BLUE];
+                for (eye, col) in blip.genes.eyes.iter().zip(col.iter()) {
+                    let eye = vecmath::rad_norm(base_angle + eye);
+                    let vis = search
+                        .iter()
+                        .map(|(a, p)| (vecmath::rad_norm(a - eye), p))
+                        .filter(|(a, _p)| a.abs() < (0.1 * PI));
+                    for (a, p) in vis {
+                        assert!(!a.is_nan());
+                        let t = c
+                            .transform
+                            .trans(p[0] / SIM_WIDTH * width, p[1] / SIM_HEIGHT * height);
+
+                        ellipse(*col, RECT, t, gl);
+                    }
                 }
-
+                for (eye, col) in blip.genes.eyes.iter().zip(col.iter()) {
+                    let (s, c) = eye.sin_cos();
+                    line_from_to(
+                        *col,
+                        1.,
+                        [0., 0.],
+                        [s * 10., c * 10.],
+                        transform.rot_rad(-PI),
+                        gl,
+                    );
+                }
                 let display = format!(
-                    "children: {}\nhp: {:.2}\ngeneration: {}\nage: {:.2}",
-                    blip.status.children, blip.status.hp, blip.status.generation, blip.status.age,
+                    "children: {}\nhp: {:.2}\ngeneration: {}\nage: {:.2}\nheading: {:.2}\neyes: {:.2?}",
+                    blip.status.children,
+                    blip.status.hp,
+                    blip.status.generation,
+                    blip.status.age,
+                    base_angle,
+                    blip.genes.eyes,
                 );
                 let size = 20_usize;
                 display_text(&display, glyph_cache, pos_transform, BLACK, size, gl).unwrap();

@@ -68,52 +68,24 @@ pub fn scale(mut a: Vector, scalar: f64) -> Vector {
     a
 }
 
-/// relative angle, in radians, range -pi - pi
-#[allow(unused)]
-pub fn angle_between(base: Vector, other: Vector) -> f64 {
-    let delta = sub(other, base);
-    let n = norm(delta);
-    angle(n)
+/// atan2 is the inverse of sin_cos()
+/// and turns a (unit/normalized)-vector into rads
+pub fn atan2(vec: Vector) -> f64 {
+    vec[0].atan2(vec[1])
 }
 
-/// angle on the unit cirle, input needs to be normalize
-/// otherwise you get NaNs
-/// to be more precize actually only the x component has to be normalized
-pub fn angle(norm: Vector) -> f64 {
-    let x = norm[0];
-    let rad = x.asin();
-    let ypos = norm[1].is_sign_positive();
-
-    // fixme: this feels insanely ugly
-    if ypos {
-        rad
-    } else {
-        std::f64::consts::PI.copysign(x) - rad
-    }
-}
-
-#[test]
-fn angle_test() {
-    let steps = 100_000;
-    let inc = 1. / (steps as f64);
-    let pi = std::f64::consts::PI;
-    for i in -steps..steps {
-        let num = (i as f64) * inc;
-        let pinum = num * pi;
-        let (x, y) = pinum.sin_cos();
-
-        let a = angle([x, y]);
-
-        let d = (pinum - a).abs();
-        assert!(
-            d < 0.00001,
-            "pinum: {}, a: {}, x: {}, d: {}",
-            pinum,
-            a,
-            x,
-            d
-        );
-    }
+/// normalizes a value in radians back into the [-pi,pi] range.
+/// this is required after basically any operation on (2) radians.
+/// this is not simply modulo, as modulo maps pi+1 -> 1 instead of -pi+1
+pub fn rad_norm(rad: f64) -> f64 {
+    //todo: maybe i can express this in a nicer way, with only one modulo and no shifts
+    use std::f64::consts::PI;
+    // valid range:
+    // [-pi, pi] -> [0, 2pi] -> % -> [-pi, pi]
+    let up = ((rad + PI) % (2. * PI)) - PI;
+    // [-pi, pi] -> [-2pi, 0] -> % -> [-pi, pi]
+    let down = ((up - PI) % (2. * PI)) + PI;
+    down
 }
 
 #[inline]

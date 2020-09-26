@@ -129,6 +129,7 @@ impl Brain for BigBrain {
             .zip(mid.iter_mut())
             .zip(self.mid_bias.iter())
         {
+            assert_eq!(iw.len(), inputs.data.len());
             let weighted_in: f64 = iw.iter().zip(&inputs.data).map(|(iw, i)| iw * i).sum();
             let weighted_in = weighted_in + bias;
             let clamped = weighted_in.max(-20.).min(20.);

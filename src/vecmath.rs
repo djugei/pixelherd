@@ -92,7 +92,8 @@ pub fn rad_norm(rad: f64) -> f64 {
 pub fn validate(v: &Vector) {
     debug_assert!(notnan(v), "NaNs found in {:?}", v);
 }
-
+#[allow(unused)]
+#[inline]
 pub fn notnan(v: &Vector) -> bool {
     !(v[0].is_nan() || v[1].is_nan())
 }

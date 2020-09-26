@@ -36,7 +36,8 @@ enum SelectionE {
 
 impl SelectionE {
     fn new() -> Self {
-        SelectionE::None
+        //SelectionE::None
+        SelectionE::Mouse
     }
     // todo: add pre
     fn next(self) -> Self {

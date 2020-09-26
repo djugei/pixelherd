@@ -56,6 +56,7 @@ use select::Selection;
 //        v
 //
 // so height is actually "depth"
+// todo: make sure this is actually true, something seems fucky
 
 const FOOD_WIDTH: usize = 50;
 const FOOD_HEIGHT: usize = 50;

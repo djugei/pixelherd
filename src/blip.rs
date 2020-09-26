@@ -134,8 +134,7 @@ impl<B: Brain> Blip<B> {
         self.status.spike = spike.min(1.).max(0.);
 
         // change direction
-        const ORTHO: Vector = [0., 1.];
-        let steer = vecmath::scale(ORTHO, outputs.steering());
+        let steer = [0., outputs.steering()];
         // fixme: handle 0 speed
         let dir = vecmath::norm(old.status.vel);
 

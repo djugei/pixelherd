@@ -33,6 +33,7 @@ use rayon::prelude::ParallelIterator;
 use inline_tweak::tweak;
 
 mod vecmath;
+use vecmath::Vector;
 
 mod brains;
 use brains::BigBrain;
@@ -112,6 +113,22 @@ where
         .collect()
 }
 
+fn locate_in_radius(
+    tree: &RTree<BlipLoc>,
+    center: Vector,
+    env: f64,
+) -> impl Iterator<Item = (&BlipLoc, f64)> {
+    let lu = vecmath::add(center, [-env, -env]);
+    let rd = vecmath::add(center, [env, env]);
+
+    let bb = rstar::AABB::from_corners(lu, rd);
+
+    use rstar::PointDistance;
+    tree.locate_in_envelope(&bb)
+        .map(move |p| (p, p.position().distance_2(&center)))
+        .filter(move |(_p, d)| *d <= env)
+}
+
 impl App {
     fn render<C>(&mut self, args: &RenderArgs, glyph_cache: &mut C)
     where
@@ -168,30 +185,22 @@ impl App {
 
                 let base_angle = vecmath::atan2(vecmath::norm(blip.status.vel));
 
-                let search = self
-                    .tree
-                    .locate_within_distance(blip.status.pos, LOCAL_ENV)
-                    .filter(|d| d.position() != &blip.status.pos)
-                    .map(|d| *d.position())
-                    .map(|d| {
-                        let diff = vecmath::sub(d, blip.status.pos);
-                        let diff = vecmath::norm(diff);
-                        let angle = vecmath::atan2(diff);
-                        (angle, d)
-                    })
+                let search = locate_in_radius(&self.tree, blip.status.pos, LOCAL_ENV)
+                    .filter(|(p, _)| *p.position() != blip.status.pos)
                     .collect::<Vec<_>>();
 
                 const RECT: [f64; 4] = [-5., -5., 10., 10.];
                 use std::f64::consts::PI;
                 let col = [RED, GREEN, BLUE];
+
                 for (eye, col) in blip.genes.eyes.iter().zip(col.iter()) {
-                    let eye = vecmath::rad_norm(base_angle + eye);
-                    let vis = search
-                        .iter()
-                        .map(|(a, p)| (vecmath::rad_norm(a - eye), p))
-                        .filter(|(a, _p)| a.abs() < (0.1 * PI));
-                    for (a, p) in vis {
-                        assert!(!a.is_nan());
+                    let eyesearch =
+                        blip::eyefilter(search.iter(), &blip.status, *eye, 0.2 * PI, |(p, _d)| {
+                            *p.position()
+                        });
+
+                    for (p, _) in eyesearch {
+                        let p = *p.position();
                         let t = c
                             .transform
                             .trans(p[0] / SIM_WIDTH * width, p[1] / SIM_HEIGHT * height);
@@ -199,6 +208,7 @@ impl App {
                         ellipse(*col, RECT, t, gl);
                     }
                 }
+
                 for (eye, col) in blip.genes.eyes.iter().zip(col.iter()) {
                     let (s, c) = eye.sin_cos();
                     line_from_to(
@@ -236,7 +246,6 @@ impl App {
                 );
             }
         }
-
         self.gl.draw_end();
     }
 

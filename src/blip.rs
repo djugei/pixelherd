@@ -11,6 +11,9 @@ use rstar::RTree;
 use crate::BlipLoc;
 use crate::FoodGrid;
 
+use crate::vecmath;
+use crate::vecmath::Vector;
+
 use atomic::Atomic;
 use atomic::Ordering;
 
@@ -131,8 +134,6 @@ impl<B: Brain> Blip<B> {
         self.status.spike = spike.min(1.).max(0.);
 
         // change direction
-        use crate::vecmath;
-        use crate::vecmath::Vector;
         const ORTHO: Vector = [0., 1.];
         let steer = vecmath::scale(ORTHO, outputs.steering());
         // fixme: handle 0 speed
@@ -309,4 +310,27 @@ impl<B: Brain> Genes<B> {
             eyes,
         }
     }
+}
+
+pub fn eyefilter<'a, I, T, F>(
+    env: I,
+    status: &'a Status,
+    eye: f64,
+    fov: f64,
+    map: F,
+) -> impl Iterator<Item = T> + 'a
+where
+    I: Iterator<Item = T> + 'a,
+    F: Fn(&T) -> Vector + 'a,
+{
+    let base_angle = vecmath::atan2(vecmath::norm(status.vel));
+    let eye_angle = vecmath::rad_norm(base_angle + eye);
+    env.filter(move |t| {
+        let pos = map(t);
+        let diff = vecmath::sub(pos, status.pos);
+        let diff_norm = vecmath::norm(diff);
+        let angle = vecmath::atan2(diff_norm);
+        let angle_diff = vecmath::rad_norm(angle - eye_angle);
+        angle_diff.abs() < fov
+    })
 }

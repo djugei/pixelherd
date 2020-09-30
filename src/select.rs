@@ -1,6 +1,6 @@
+use crate::app::BlipLoc;
 use crate::brains::Brain;
 use crate::Blip;
-use crate::BlipLoc;
 use rstar::RTree;
 
 #[derive(Clone, Copy, Debug)]

@@ -1,6 +1,4 @@
-use crate::LOCAL_ENV;
-use crate::SIM_HEIGHT;
-use crate::SIM_WIDTH;
+use crate::config::*;
 use rand::Rng;
 
 use crate::brains;
@@ -8,8 +6,8 @@ use crate::brains::Brain;
 
 use rstar::RTree;
 
-use crate::BlipLoc;
-use crate::FoodGrid;
+use crate::app::BlipLoc;
+use crate::app::FoodGrid;
 
 use crate::vecmath;
 use crate::vecmath::Vector;
@@ -310,7 +308,12 @@ impl<B: Brain> Genes<B> {
         }
     }
 }
+pub fn scaled_rand<R: Rng>(mut r: R, rate: f64, abs_scale: f64, mul_scale: f64, val: &mut f64) {
+    *val += r.gen_range(-abs_scale, abs_scale) * r.gen_range(0., rate);
+    *val *= 1. + (r.gen_range(-mul_scale, mul_scale) * r.gen_range(0., rate));
+}
 
+// maybe instead return (T, angle) and let upstream deal with it
 pub fn eyefilter<'a, I, T, F>(
     env: I,
     status: &'a Status,

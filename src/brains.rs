@@ -1,5 +1,5 @@
 #![allow(unused)]
-use crate::scaled_rand;
+use crate::blip::scaled_rand;
 use rand::Rng;
 const N_INPUTS: usize = 4;
 const N_OUTPUTS: usize = 6;

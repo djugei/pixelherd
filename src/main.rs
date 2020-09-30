@@ -69,6 +69,24 @@ const SIM_WIDTH: f64 = (FOOD_WIDTH * 10) as f64;
 const SIM_HEIGHT: f64 = (FOOD_HEIGHT * 10) as f64;
 
 type BlipLoc = PointWithData<usize, [f64; 2]>;
+// the foodgrid is currently accessed in parallel. while there are no classical dataraces (to my
+// knowledge) the behaviour is different from a linear execution:
+// a "later" actor may have accessed and updated a field before an "earlier" one from a different
+// thread got to execute.
+// fixing that, forcing step size to a constant number, and "determinizing" the rng would make
+// the execution entirely deterministic, which might be a desireable property.
+// to do so the food grid would need to store for each field the highest id that accessed it this
+// step.
+// if a blip tries to access a food grid field thats marked with a higher id than itself it needs
+// to undo that:
+// when accessing a field each blip stores the previous id.
+// when a blip detects a conflict, it follows the chain in order, re-calculating each blip,
+// then inserting its own modification at the appropriate location, and afterwards running all
+// blips with a higher id.
+// this is obviously quite expensive, and might even have to be done multiple times.
+// it _can_ be done in parallel though so if running it on the worker thread or on the main thread
+// (which would limit the number of times such a re-execution needs to happen to one/field) depends
+// on the expected contention and number of available cpus
 type FoodGrid = [[Atomic<f64>; FOOD_HEIGHT]; FOOD_WIDTH];
 
 pub struct App {
@@ -475,4 +493,39 @@ fn main() {
             }
         }
     }
+}
+
+#[test]
+fn test_atomic() {
+    use std::mem::{align_of, size_of};
+    let base = (
+        Atomic::<u64>::is_lock_free(),
+        size_of::<u64>(),
+        align_of::<u64>(),
+    );
+    let split1 = (
+        Atomic::<(f32, f32)>::is_lock_free(),
+        size_of::<(f32, f32)>(),
+        align_of::<(f32, f32)>(),
+    );
+    let split2 = (
+        Atomic::<[f32; 2]>::is_lock_free(),
+        size_of::<[f32; 2]>(),
+        align_of::<[f32; 2]>(),
+    );
+    #[repr(align(8))]
+    struct Force {
+        _food: f32,
+        _meat: f32,
+    }
+    let force = (
+        Atomic::<Force>::is_lock_free(),
+        size_of::<Force>(),
+        align_of::<Force>(),
+    );
+    // result: on architectures where 64-bit-atomics exist i can split them into 2 f32
+    // by forcing alignment to be 8 (instead of the native 4)
+    // i.e. (f32,f32) and [f32;2] do not work
+    dbg!(base, split1, split2, force, Atomic::<i128>::is_lock_free());
+    assert!(Atomic::<Force>::is_lock_free());
 }

@@ -93,7 +93,9 @@ pub trait Brain: Clone {
 }
 
 // todo: bigbrain is currently too inflexible, it just outputs values very close to 0 for basically
-// any input
+// any input. maybe i can do a 2-step-process where i first use a 1-layer brain
+// and then add another layer between it and the input (or the output) with most weights
+// initialized to ~0, and one to ~1.
 #[derive(Copy, Clone, Default, PartialEq)]
 pub struct BigBrain {
     // each output gets a weight for each input

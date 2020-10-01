@@ -1,14 +1,8 @@
 // todo:
-// (1). create fixed-size (array) rtree instead of vec-based
-//	(can mostly copy the rtree/spade crate, removing abstractions)
-//	(pushing that back for now, its actually an ok implentation, especially for 100%safe)
-// [2]. open a drawable window (conrod)
-// [2.1.] draw a triangle
 // 3. port one or both of the brains from c++
-// 4. port the main game loop
-// 5. parallelize it
-// [6.] use rtree for distance lookups
 // 7. add state, both for pausing/resuming simulation and for extracting successful specimen
+// 8. add carnivores, currently the simulation is undergoing boom- and bust-cycles, predators fix
+//    that a bit
 
 use opengl_graphics::{GlGraphics, OpenGL};
 use sdl2_window::Sdl2Window as Window;

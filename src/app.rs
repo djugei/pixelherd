@@ -130,14 +130,10 @@ impl<B: Brain + Send + Copy + Sync> App<B> {
         new.extend(spawns);
 
         // todo: drop some meat on death
-        let before = new.len();
         new.retain(|blip| blip.status.hp > 0.);
-        let after = new.len();
-        if after < before {
-            println!("{} deaths", before - after);
-        }
 
         if new.len() < config::REPLACEMENT {
+            println!("force-spawned");
             new.push(Blip::new(&mut rng));
         }
 

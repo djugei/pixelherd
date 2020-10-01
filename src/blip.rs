@@ -72,9 +72,9 @@ impl<B: Brain> Blip<B> {
                     let nb = &olds[id];
                     let rgb = nb.status.rgb;
                     let write = [
-                        rgb[0] as f64,
-                        rgb[1] as f64,
-                        rgb[2] as f64,
+                        rgb[0] as f64 - 0.5,
+                        rgb[1] as f64 - 0.5,
+                        rgb[2] as f64 - 0.5,
                         angle,
                         (dis / config::b::LOCAL_ENV) - 0.5,
                     ];
@@ -104,6 +104,7 @@ impl<B: Brain> Blip<B> {
         let mut grid_value = grid_slot.load(Ordering::Relaxed);
         let mut outputs;
         loop {
+            //todo: also smell distance from center of tile
             // food is ~ 0-10+, scale to -5 to 5+
             *inputs.smell_mut() = grid_value - 5.;
 
@@ -118,7 +119,7 @@ impl<B: Brain> Blip<B> {
             // full consumption on 5 food, double on 15
             let gridfactor = 0.5 + (grid_value / 10.);
             // 1..11
-            let div = 1. + (outputs.speed() * 2.);
+            let div = 1. + (outputs.speed() * 2.5);
             let consumption = (max * gridfactor / div).min(grid_value);
             if consumption > 0. && !consumption.is_nan() {
                 let newval = grid_value - consumption;
@@ -190,7 +191,6 @@ impl<B: Brain> Blip<B> {
         // its a rather rare event though so its special-cased
 
         let ret = if self.status.hp > old.genes.repr_tres {
-            println!("new spawn!");
             let spawn = self.split(&mut rng);
             Some(spawn)
         } else {

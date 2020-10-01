@@ -68,7 +68,7 @@ fn main() {
 
     let mut rng = rand::thread_rng();
 
-    let mut app = App::new(&mut rng);
+    let mut app = App::<brains::SimpleBrain>::new(&mut rng);
     let mut render = Renderer {
         gl: GlGraphics::new(opengl),
         mousepos: [0.; 2],
@@ -81,9 +81,9 @@ fn main() {
         opengl_graphics::GlyphCache::new("/usr/share/fonts/TTF/FiraCode-Regular.ttf", (), ts)
             .unwrap();
 
-    let mut hurry = 1;
+    let mut speed = 1;
     let mut pause = false;
-    let mut hide = false;
+    let mut hyper = false;
 
     let mut events = Events::new(EventSettings::new());
     while let Some(e) = events.next(&mut window) {
@@ -101,18 +101,23 @@ fn main() {
                         //fixme: app.blips.push(Blip::new(&mut rng));
                     }
                 }
+                input::Button::Keyboard(input::keyboard::Key::R) => {
+                    if args.state == input::ButtonState::Release {
+                        app.report()
+                    }
+                }
                 input::Button::Keyboard(input::keyboard::Key::NumPadPlus) => {
                     if args.state == input::ButtonState::Release {
-                        hurry += 1;
-                        println!("now running {} 0.02 updates per update", hurry);
+                        speed += 1;
+                        println!("now running {} 0.02 updates per update", speed);
                     }
                 }
                 input::Button::Keyboard(input::keyboard::Key::NumPadMinus) => {
                     if args.state == input::ButtonState::Release {
-                        if hurry > 1 {
-                            hurry -= 1;
+                        if speed > 1 {
+                            speed -= 1;
                         }
-                        println!("now running {} 0.02 updates per update", hurry);
+                        println!("now running {} 0.02 updates per update", speed);
                     }
                 }
                 input::Button::Keyboard(input::keyboard::Key::Space) => {
@@ -123,8 +128,12 @@ fn main() {
                 }
                 input::Button::Keyboard(input::keyboard::Key::H) => {
                     if args.state == input::ButtonState::Release {
-                        hide = !hide;
-                        println!("hiding rendering {}", pause);
+                        hyper = !hyper;
+                        if hyper {
+                            println!("HYPERSPEED");
+                        } else {
+                            println!("regular speed");
+                        }
                     }
                 }
                 input::Button::Keyboard(k) => {
@@ -139,15 +148,15 @@ fn main() {
             render.mousepos = args;
         }
         if let Some(args) = e.render_args() {
-            if !hide {
-                render.render(&app, &args, &mut cache);
-            }
+            //if !hide {
+            render.render(&app, &args, &mut cache);
+            //}
         }
 
         if e.update_args().is_some() {
             if pause {
             } else {
-                let times = if hide { 1000 } else { hurry };
+                let times = if hyper { 1000 * speed } else { speed };
                 // always running fixed step now, for the determinism
                 for _ in 0..times {
                     app.update(&UpdateArgs { dt: 0.02 }, &mut rng);
@@ -159,6 +168,7 @@ fn main() {
 
 #[test]
 fn test_atomic() {
+    use atomic::Atomic;
     use std::mem::{align_of, size_of};
     let base = (
         Atomic::<u64>::is_lock_free(),

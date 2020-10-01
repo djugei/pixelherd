@@ -1,5 +1,6 @@
 #![allow(unused)]
 use crate::blip::scaled_rand;
+use crate::config;
 use rand::Rng;
 const N_INPUTS: usize = 4;
 const N_OUTPUTS: usize = 6;
@@ -9,6 +10,7 @@ const INNER_SIZE: usize = (N_INPUTS + N_OUTPUTS) / 2;
 /// stored as an array for easy
 /// neural network access.
 /// but accessed/modified through methods
+//todo: scale all inputs to ~-10-10
 #[derive(Clone, PartialEq, Default, Debug)]
 pub struct Inputs {
     data: [f64; N_INPUTS],
@@ -37,16 +39,29 @@ pub struct Outputs {
     data: [f64; N_OUTPUTS],
 }
 impl Outputs {
+    // fixme: shouldn't this be 0-1?
+    /// (-0.5, 0.5)
     pub fn spike(&self) -> f64 {
         self.data[0]
     }
+    /// (-0.5, 0.5)
     pub fn steering(&self) -> f64 {
         self.data[1]
     }
+    /// (0, MAX_SPEED)
     pub fn speed(&self) -> f64 {
         // the exp is to undo the sigmoid from the nn, maybe i can output raws and do the
-        // sigmoid inline on the getters
-        self.data[2].exp()
+        // sigmoid inline on the getters since they are read about once each mostly
+        // (0, 1)
+        let a = (self.data[2] + 0.5);
+        // (1, e)
+        let b = a.exp();
+        // (0, e-1)
+        // ~= (0, 1.72)
+        let c = b - 1.;
+        let speedup = config::b::MAX_SPEED / (std::f64::consts::E - 1.);
+        // (0, MAX_SPEED)
+        c * speedup
     }
     // would be nice if there was an easy way to return &[f64;3] split of from the main array
     pub fn r(&self) -> f64 {
@@ -66,6 +81,8 @@ pub trait Brain: Clone {
     fn mutate<R: Rng>(&mut self, rng: R, rate: f64);
 }
 
+// todo: bigbrain is currently too inflexible, it just outputs values very close to 0 for basically
+// any input
 #[derive(Copy, Clone, Default, PartialEq)]
 pub struct BigBrain {
     // each output gets a weight for each input

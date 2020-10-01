@@ -1,7 +1,7 @@
 use crate::app::locate_in_radius;
 use crate::app::App;
 use crate::blip;
-use crate::config::*;
+use crate::config;
 use crate::select::Selection;
 use crate::vecmath;
 use crate::GlGraphics;
@@ -13,10 +13,11 @@ pub struct Renderer {
     pub selection: Selection,
 }
 impl Renderer {
-    pub fn render<C>(&mut self, app: &App, args: &RenderArgs, glyph_cache: &mut C)
+    pub fn render<C, B>(&mut self, app: &App<B>, args: &RenderArgs, glyph_cache: &mut C)
     where
         C: graphics::character::CharacterCache<Texture = opengl_graphics::Texture>,
         <C as graphics::character::CharacterCache>::Error: std::fmt::Debug,
+        B: crate::brains::Brain + Send + Copy + Sync,
     {
         use graphics::*;
 
@@ -36,16 +37,16 @@ impl Renderer {
         let c = self.gl.draw_begin(args.viewport());
         let gl = &mut self.gl;
         clear(WHITE, gl);
-        for w in 0..FOOD_WIDTH {
-            for h in 0..FOOD_HEIGHT {
+        for w in 0..config::FOOD_WIDTH {
+            for h in 0..config::FOOD_HEIGHT {
                 let transform = c
                     .transform
                     .trans(
-                        (w * 10) as f64 / SIM_WIDTH * width,
-                        (h * 10) as f64 / SIM_HEIGHT * height,
+                        (w * 10) as f64 / config::SIM_WIDTH * width,
+                        (h * 10) as f64 / config::SIM_HEIGHT * height,
                     )
                     .zoom(10.)
-                    .scale(width / SIM_WIDTH, height / SIM_HEIGHT);
+                    .scale(width / config::SIM_WIDTH, height / config::SIM_HEIGHT);
                 // maybe logscale this
                 let trans = app.foodgrid()[w][h]
                     // relaxed ordering should be fine, nobody should really be accessing the app
@@ -58,23 +59,24 @@ impl Renderer {
         }
         // fixme move all coordinate calculations out
         // ideally i would have two types, simpos and screenpos
-        let sim_x = self.mousepos[0] * SIM_WIDTH / width;
-        let sim_y = self.mousepos[1] * SIM_HEIGHT / height;
+        let sim_x = self.mousepos[0] * config::SIM_WIDTH / width;
+        let sim_y = self.mousepos[1] * config::SIM_HEIGHT / height;
         let marker = self
             .selection
             .select(app.blips(), app.tree(), &[sim_x, sim_y]);
         for (index, blip) in app.blips().iter().enumerate() {
             let (px, py) = (blip.status.pos[0], blip.status.pos[1]);
             let (pdx, pdy) = (blip.status.vel[0], blip.status.vel[1]);
-            let pos_transform = c
-                .transform
-                .trans(px / SIM_WIDTH * width, py / SIM_HEIGHT * height);
+            let pos_transform = c.transform.trans(
+                px / config::SIM_WIDTH * width,
+                py / config::SIM_HEIGHT * height,
+            );
             let transform = pos_transform.orient(pdx, pdy).rot_deg(90.);
             if Some(index) == marker {
                 polygon(blip.status.rgb, TRI, transform.zoom(2.), gl);
                 let base_angle = vecmath::atan2(vecmath::norm(blip.status.vel));
 
-                let search = locate_in_radius(&app.tree(), blip.status.pos, LOCAL_ENV)
+                let search = locate_in_radius(&app.tree(), blip.status.pos, config::b::LOCAL_ENV)
                     .filter(|(p, _)| *p.position() != blip.status.pos)
                     .collect::<Vec<_>>();
 
@@ -90,9 +92,10 @@ impl Renderer {
 
                     for (p, _) in eyesearch {
                         let p = *p.position();
-                        let t = c
-                            .transform
-                            .trans(p[0] / SIM_WIDTH * width, p[1] / SIM_HEIGHT * height);
+                        let t = c.transform.trans(
+                            p[0] / config::SIM_WIDTH * width,
+                            p[1] / config::SIM_HEIGHT * height,
+                        );
 
                         ellipse(*col, RECT, t, gl);
                     }
@@ -110,13 +113,13 @@ impl Renderer {
                     );
                 }
                 let display = format!(
-                    "children: {}\nhp: {:.2}\ngeneration: {}\nage: {:.2}\nheading: {:.2}\neyes: {:.2?}",
+                    "children: {}\nhp: {:.2}\ngeneration: {}\nage: {:.2}\nheading: {:.2}\nspeed: {:.2?}",
                     blip.status.children,
                     blip.status.hp,
                     blip.status.generation,
                     blip.status.age,
                     base_angle,
-                    blip.genes.eyes,
+                    vecmath::len(blip.status.vel),
                 );
                 let size = 20_usize;
                 display_text(&display, glyph_cache, pos_transform, BLACK, size, gl).unwrap();

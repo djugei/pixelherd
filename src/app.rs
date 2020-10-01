@@ -1,7 +1,7 @@
-use crate::config::*;
+use crate::config;
 
 use crate::blip::Blip;
-use crate::brains::BigBrain;
+use crate::brains::Brain;
 use crate::vecmath;
 use crate::vecmath::Vector;
 use atomic::Atomic;
@@ -18,7 +18,7 @@ pub type BlipLoc = PointWithData<usize, [f64; 2]>;
 // knowledge) the behaviour is different from a linear execution:
 // a "later" actor may have accessed and updated a field before an "earlier" one from a different
 // thread got to execute.
-// fixing that, forcing step size to a constant number, and "determinizing" the rng would make
+// fixing that, and "determinizing" the rng would make
 // the execution entirely deterministic, which might be a desireable property.
 // to do so the food grid would need to store for each field the highest id that accessed it this
 // step.
@@ -35,27 +35,30 @@ pub type BlipLoc = PointWithData<usize, [f64; 2]>;
 //
 // in the opposite instead of re-cacluating when noticing a concurrent access we could just
 // re-subtract from the new value if determinism is not a concern
-pub type FoodGrid = [[Atomic<f64>; FOOD_HEIGHT]; FOOD_WIDTH];
+//
+// ... alternatively i could just always read last steps food grid and write into the new one,
+// accepting negatives
+pub type FoodGrid = [[Atomic<f64>; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
 
-pub struct App {
-    blips: Vec<Blip<BigBrain>>,
+pub struct App<B: Brain + Send + Copy + Sync> {
+    blips: Vec<Blip<B>>,
     foodgrid: FoodGrid,
     tree: RTree<BlipLoc>,
     time: f64,
 }
 
-impl App {
+impl<B: Brain + Send + Copy + Sync> App<B> {
     pub fn foodgrid(&self) -> &FoodGrid {
         &self.foodgrid
     }
     pub fn tree(&self) -> &RTree<BlipLoc> {
         &self.tree
     }
-    pub fn blips(&self) -> &[Blip<BigBrain>] {
+    pub fn blips(&self) -> &[Blip<B>] {
         &self.blips
     }
     pub fn new<R: Rng>(mut rng: R) -> Self {
-        let foodgrid = [[0.; FOOD_HEIGHT]; FOOD_WIDTH];
+        let foodgrid = [[0.; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
         //safety: this is absolutely not safe as i am relying on the internal memory layout of a third
         // party library that is almost guaranteed to not match on 32 bit platforms.
         //
@@ -69,18 +72,18 @@ impl App {
 
         // Create a new game and run it.
         let mut app = App {
-            blips: Vec::with_capacity(INITIAL_CELLS),
+            blips: Vec::with_capacity(config::INITIAL_CELLS),
             tree: RTree::new(),
             foodgrid,
             time: 0.,
         };
 
-        for _ in 0..INITIAL_CELLS {
+        for _ in 0..config::INITIAL_CELLS {
             app.blips.push(Blip::new(&mut rng));
         }
 
-        for w in 0..FOOD_WIDTH {
-            for h in 0..FOOD_HEIGHT {
+        for w in 0..config::FOOD_WIDTH {
+            for h in 0..config::FOOD_HEIGHT {
                 //fixme: this should be an exponential distribution instead
                 if rng.gen_range(0, 3) == 1 {
                     *app.foodgrid[w][h].get_mut() = rng.gen_range(0., 10.);
@@ -91,9 +94,6 @@ impl App {
     }
     // fixme: make sure dt is used literally on every change
     pub fn update<R: Rng>(&mut self, args: &UpdateArgs, mut rng: R) {
-        if args.dt > 0.3 {
-            println!("we are lagging, {} s/tick", args.dt);
-        }
         self.time += args.dt;
         // update the inputs
         // todo: don't clone here, keep two buffers and swap instead
@@ -137,19 +137,24 @@ impl App {
             println!("{} deaths", before - after);
         }
 
-        if new.len() < REPLACEMENT {
+        if new.len() < config::REPLACEMENT {
             new.push(Blip::new(&mut rng));
         }
 
         self.blips = new;
 
-        // add some food
-        // fixme: if dt * factor > 1 this needs to run multiple times
-        if rng.gen_bool(args.dt) {
-            let w: usize = rng.gen_range(0, FOOD_WIDTH);
-            let h: usize = rng.gen_range(0, FOOD_HEIGHT);
-            let f: f64 = rng.gen_range(1., 4.);
-            *self.foodgrid[w][h].get_mut() += f;
+        // chance could be > 1 if dt or replenish are big enough
+        let mut chance = (config::REPLENISH * args.dt) / 4.;
+        while chance > 0. {
+            if rng.gen_bool(chance.min(1.)) {
+                let w: usize = rng.gen_range(0, config::FOOD_WIDTH);
+                let h: usize = rng.gen_range(0, config::FOOD_HEIGHT);
+                // expected: 4, chances is divided by 4
+                // trying to get a less uniform food distribution
+                let f: f64 = rng.gen_range(3., 5.);
+                *self.foodgrid[w][h].get_mut() += f;
+            }
+            chance -= 1.;
         }
 
         // move blips
@@ -170,6 +175,45 @@ impl App {
             .map(|(p, b)| BlipLoc::new(p, b.status.pos))
             .collect();
         self.tree = RTree::bulk_load(tree);
+    }
+    pub fn report(&self) {
+        use crate::select::Selection;
+        let num = self.blips.len();
+        if num == 0 {
+            println!("no blips at all");
+        } else {
+            let age = self.blips[Selection::Age
+                .select(&self.blips, &self.tree, &[0., 0.])
+                .unwrap()]
+            .status
+            .age;
+            let generation = self.blips[Selection::Generation
+                .select(&self.blips, &self.tree, &[0., 0.])
+                .unwrap()]
+            .status
+            .generation;
+            let spawns = self.blips[Selection::Spawns
+                .select(&self.blips, &self.tree, &[0., 0.])
+                .unwrap()]
+            .status
+            .children;
+
+            let food: f64 = self
+                .foodgrid
+                .iter()
+                .flat_map(|a| a.iter())
+                .map(|c| c.load(atomic::Ordering::Relaxed))
+                .sum();
+
+            let avg_food = food / ((config::FOOD_HEIGHT * config::FOOD_WIDTH) as f64);
+
+            println!("number of blips    : {}", num);
+            println!("oldest             : {}", age);
+            println!("highest generation : {}", generation);
+            println!("most reproduction  : {}", spawns);
+            println!("total food         : {}", food);
+            println!("average food       : {}", avg_food);
+        }
     }
 }
 

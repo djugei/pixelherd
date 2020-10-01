@@ -1,4 +1,4 @@
-use crate::config::*;
+use crate::config;
 use rand::Rng;
 
 use crate::brains;
@@ -14,9 +14,6 @@ use crate::vecmath::Vector;
 
 use atomic::Atomic;
 use atomic::Ordering;
-
-#[allow(unused)]
-use inline_tweak::tweak;
 
 #[derive(Clone, PartialEq)]
 pub struct Blip<B: Brain> {
@@ -43,7 +40,7 @@ impl<B: Brain> Blip<B> {
         let mut inputs: brains::Inputs = Default::default();
 
         let search = tree
-            .locate_within_distance(old.status.pos, LOCAL_ENV)
+            .locate_within_distance(old.status.pos, config::b::LOCAL_ENV)
             .filter(|d| d.position() != &old.status.pos);
 
         for nb in search {
@@ -63,6 +60,8 @@ impl<B: Brain> Blip<B> {
         *inputs.clock1_mut() = (time * old.genes.clockstretch_1).sin();
         *inputs.clock2_mut() = (time * old.genes.clockstretch_2).sin();
 
+        // todo: use eyes
+
         let gridpos = [
             (self.status.pos[0] / 10.) as usize,
             (self.status.pos[1] / 10.) as usize,
@@ -78,21 +77,24 @@ impl<B: Brain> Blip<B> {
         let mut grid_value = grid_slot.load(Ordering::Relaxed);
         let mut outputs;
         loop {
-            *inputs.smell_mut() = grid_value;
+            // food is ~ 0-10+, scale to -5 to 5+
+            *inputs.smell_mut() = grid_value - 5.;
 
             // inputs are processed at this point, time to feed the brain some data
             outputs = old.genes.brain.think(&inputs);
 
             // eat food
-            //todo: consider using actual speed, not acceleration
-            //todo also this needs to be finetuned quite a bit in paralel with food spawning and
-            //movement speed, rn they are very very slow in general and just zoom over food,
-            //fully consuming it
-            let speed = outputs.speed() * tweak!(1.);
-            // eat at most half the field/second
-            let eating = (grid_value / speed.max(1.)) * dt;
-            if eating > 0. && !eating.is_nan() {
-                let newval = grid_value - eating;
+            //todo: put into config
+            // can eat 10 food / second (arbitrary)
+            let max = 10. * dt;
+            // half consumption speed on basically empty square
+            // full consumption on 5 food, double on 15
+            let gridfactor = 0.5 + (grid_value / 10.);
+            // 1..11
+            let div = 1. + (outputs.speed() * 2.);
+            let consumption = (max * gridfactor / div).min(grid_value);
+            if consumption > 0. && !consumption.is_nan() {
+                let newval = grid_value - consumption;
                 match grid_slot.compare_exchange(
                     grid_value,
                     newval,
@@ -100,7 +102,7 @@ impl<B: Brain> Blip<B> {
                     Ordering::Relaxed,
                 ) {
                     Ok(_) => {
-                        self.status.food += eating;
+                        self.status.food += consumption;
                     }
                     Err(v) => {
                         //println!("{:?} had to reloop for cas", gridpos);
@@ -116,7 +118,8 @@ impl<B: Brain> Blip<B> {
         if casstat > 1 {
             println!("[{}]: had to cas-loop {} times", time, casstat);
         }
-        let digest = self.status.food.min(4. * dt);
+        // can only digest 2 out of the 10 theoretical max consumption food
+        let digest = self.status.food.min(2. * dt);
         self.status.food -= digest;
         self.status.hp += digest;
 
@@ -146,7 +149,12 @@ impl<B: Brain> Blip<B> {
 
         // use energy
 
-        let exhaustion = (0.1 + (outputs.speed().abs() * 0.4)) * dt * 0.1;
+        let idling = 1.;
+        // speed is (0..10)
+        let movement = outputs.speed() / 10.;
+        let ratiod =
+            (idling * config::b::IDLE_E_RATIO) + (movement * (1. - config::b::IDLE_E_RATIO));
+        let exhaustion = ratiod * dt * config::b::E_DRAIN;
         self.status.hp -= exhaustion;
 
         // reproduce & mutate
@@ -178,19 +186,19 @@ impl<B: Brain> Blip<B> {
         pos[0] += delta[0] * dt;
         pos[1] += delta[1] * dt;
 
-        pos[0] %= SIM_WIDTH;
-        pos[1] %= SIM_HEIGHT;
+        pos[0] %= config::SIM_WIDTH;
+        pos[1] %= config::SIM_HEIGHT;
 
         if pos[0] < 0. {
-            pos[0] += SIM_WIDTH
+            pos[0] += config::SIM_WIDTH
         };
         if pos[1] < 0. {
-            pos[1] += SIM_WIDTH
+            pos[1] += config::SIM_WIDTH
         };
     }
     pub fn new<R: Rng>(mut rng: R) -> Self {
-        let x = rng.gen_range(0., SIM_WIDTH);
-        let y = rng.gen_range(0., SIM_HEIGHT);
+        let x = rng.gen_range(0., config::SIM_WIDTH);
+        let y = rng.gen_range(0., config::SIM_HEIGHT);
 
         let dx = rng.gen_range(-30., 30.);
         let dy = rng.gen_range(-5., 5.);
@@ -258,7 +266,7 @@ impl<B: Brain> Genes<B> {
         use std::f64::consts::PI;
         Self {
             brain: B::init(&mut rng),
-            mutation_rate: rng.gen_range(-0.001, 0.001) + 0.01,
+            mutation_rate: (rng.gen_range(-0.001, 0.001) + 0.01) * 4.,
             repr_tres: rng.gen_range(-10., 10.) + 100.,
             clockstretch_1: rng.gen_range(0.01, 1.),
             clockstretch_2: rng.gen_range(0.01, 1.),

@@ -39,28 +39,55 @@ impl<B: Brain> Blip<B> {
     {
         let mut inputs: brains::Inputs = Default::default();
 
-        let search = tree
-            .locate_within_distance(old.status.pos, config::b::LOCAL_ENV)
-            .filter(|d| d.position() != &old.status.pos);
+        let search = crate::app::locate_in_radius(tree, self.status.pos, config::b::LOCAL_ENV)
+            .filter(|(p, _d)| p.position() != &old.status.pos);
 
-        for nb in search {
+        let base_angle = base_angle(&self.status);
+        let mut eyedists = [(f64::INFINITY, 0., 0); config::b::N_EYES];
+        let mut eye_angles = [0.; config::b::N_EYES];
+        for i in 0..config::b::N_EYES {
+            eye_angles[i] = eye_angle(base_angle, self.genes.eyes[i]);
+        }
+
+        for (p, dist_squared) in search {
             // sound
-            let nb = &olds[nb.data];
-            use rstar::PointDistance;
-            let dist_squared = PointDistance::distance_2(&old.status.pos, &nb.status.pos);
+            let nb = &olds[p.data];
 
             // todo: get rid of sqrt
             let nb_sound = (nb.status.vel[0] * nb.status.vel[0])
                 + (nb.status.vel[1] * nb.status.vel[1]).sqrt();
 
             *inputs.sound_mut() += nb_sound / dist_squared;
+
+            for (i, eye) in eye_angles.iter().enumerate() {
+                let fov = 0.2 * std::f64::consts::PI;
+                let angle = eye_vision(&self.status, *eye, nb.status.pos);
+                // see the closest one in fov
+                if angle.abs() < fov && eyedists[i].0 > dist_squared {
+                    eyedists[i] = (dist_squared, angle, p.data);
+                }
+            }
+            for (&(dis, angle, id), inp) in eyedists.iter().zip(inputs.eyes_mut().iter_mut()) {
+                if dis != f64::INFINITY {
+                    let nb = &olds[id];
+                    let rgb = nb.status.rgb;
+                    let write = [
+                        rgb[0] as f64,
+                        rgb[1] as f64,
+                        rgb[2] as f64,
+                        angle,
+                        (dis / config::b::LOCAL_ENV) - 0.5,
+                    ];
+                    for (i, w) in inp.iter_mut().zip(&write) {
+                        *i = *w;
+                    }
+                }
+            }
         }
 
         // rust apparently does the modulo [-pi/2, pi/2] internally
         *inputs.clock1_mut() = (time * old.genes.clockstretch_1).sin();
         *inputs.clock2_mut() = (time * old.genes.clockstretch_2).sin();
-
-        // todo: use eyes
 
         let gridpos = [
             (self.status.pos[0] / 10.) as usize,
@@ -258,7 +285,7 @@ pub struct Genes<B: Brain> {
     pub clockstretch_1: f64,
     pub clockstretch_2: f64,
     // 3 eyes, each represented by an angle in radians [-pi-pi]
-    pub eyes: [f64; 3],
+    pub eyes: [f64; config::b::N_EYES],
 }
 
 impl<B: Brain> Genes<B> {
@@ -321,26 +348,26 @@ pub fn scaled_rand<R: Rng>(mut r: R, rate: f64, abs_scale: f64, mul_scale: f64, 
     *val *= 1. + (r.gen_range(-mul_scale, mul_scale) * r.gen_range(0., rate));
 }
 
-// maybe instead return (T, angle) and let upstream deal with it
-pub fn eyefilter<'a, I, T, F>(
-    env: I,
-    status: &'a Status,
-    eye: f64,
-    fov: f64,
-    map: F,
-) -> impl Iterator<Item = T> + 'a
-where
-    I: Iterator<Item = T> + 'a,
-    F: Fn(&T) -> Vector + 'a,
-{
-    let base_angle = vecmath::atan2(vecmath::norm(status.vel));
-    let eye_angle = vecmath::rad_norm(base_angle + eye);
-    env.filter(move |t| {
-        let pos = map(t);
-        let diff = vecmath::sub(pos, status.pos);
-        let diff_norm = vecmath::norm(diff);
-        let angle = vecmath::atan2(diff_norm);
-        let angle_diff = vecmath::rad_norm(angle - eye_angle);
-        angle_diff.abs() < fov
-    })
+pub fn base_angle(s: &Status) -> f64 {
+    vecmath::atan2(vecmath::norm(s.vel))
+}
+
+pub fn eye_angle(base_angle: f64, eye: f64) -> f64 {
+    vecmath::rad_norm(base_angle + eye)
+}
+
+/// returns rad diff between the eye and the other blip
+/// -pi-pi
+pub fn eye_vision(
+    status: &Status,
+    //heading of the blip
+    // absolute heading of the eye
+    eye_angle: f64,
+    other: Vector,
+) -> f64 {
+    let diff = vecmath::sub(other, status.pos);
+    let diff_norm = vecmath::norm(diff);
+    let angle = vecmath::atan2(diff_norm);
+    let angle_diff = vecmath::rad_norm(angle - eye_angle);
+    angle_diff
 }

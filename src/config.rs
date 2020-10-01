@@ -14,6 +14,7 @@ pub mod b {
     pub const IDLE_E_RATIO: f64 = 0.3;
     // how much energy is used by a blip at max speed/second
     pub const E_DRAIN: f64 = 1.;
+    pub const N_EYES: usize = 3;
 }
 
 // how much food should on average be created per second

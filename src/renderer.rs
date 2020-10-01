@@ -74,7 +74,6 @@ impl Renderer {
             let transform = pos_transform.orient(pdx, pdy).rot_deg(90.);
             if Some(index) == marker {
                 polygon(blip.status.rgb, TRI, transform.zoom(2.), gl);
-                let base_angle = vecmath::atan2(vecmath::norm(blip.status.vel));
 
                 let search = locate_in_radius(&app.tree(), blip.status.pos, config::b::LOCAL_ENV)
                     .filter(|(p, _)| *p.position() != blip.status.pos)
@@ -84,11 +83,13 @@ impl Renderer {
                 use std::f64::consts::PI;
                 let col = [RED, GREEN, BLUE];
 
+                let base_angle = blip::base_angle(&blip.status);
                 for (eye, col) in blip.genes.eyes.iter().zip(col.iter()) {
-                    let eyesearch =
-                        blip::eyefilter(search.iter(), &blip.status, *eye, 0.2 * PI, |(p, _d)| {
-                            *p.position()
-                        });
+                    let eye_angle = blip::eye_angle(base_angle, *eye);
+                    let visual_fov = 0.2 * PI;
+                    let eyesearch = search.iter().filter(|(p, _d)| {
+                        blip::eye_vision(&blip.status, eye_angle, *p.position()).abs() < visual_fov
+                    });
 
                     for (p, _) in eyesearch {
                         let p = *p.position();

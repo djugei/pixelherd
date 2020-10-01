@@ -2,7 +2,8 @@
 use crate::blip::scaled_rand;
 use crate::config;
 use rand::Rng;
-const N_INPUTS: usize = 4;
+// eyes are 3 colours, angle, dist
+const N_INPUTS: usize = 4 + (config::b::N_EYES * 5);
 const N_OUTPUTS: usize = 6;
 
 const INNER_SIZE: usize = (N_INPUTS + N_OUTPUTS) / 2;
@@ -28,6 +29,16 @@ impl Inputs {
     }
     pub fn clock2_mut(&mut self) -> &mut f64 {
         &mut self.data[3]
+    }
+    pub fn eyes_mut(&mut self) -> [&mut [f64]; config::b::N_EYES] {
+        let data = &mut self.data[4..];
+        let eyesize = 5;
+        // sadly arrays and iterators don't interact well currently
+        // so this is more or less hardcoded for now
+        let (one, data) = data.split_at_mut(eyesize);
+        let (two, data) = data.split_at_mut(eyesize);
+        let (three, data) = data.split_at_mut(eyesize);
+        [one, two, three]
     }
 }
 
@@ -223,4 +234,11 @@ impl Brain for SimpleBrain {
         }
         o
     }
+}
+
+#[test]
+fn arrayacc() {
+    let arr = [0, 1, 2, 3, 4, 5, 6, 7];
+    assert_eq!(arr[3], 3);
+    assert_eq!(arr[4..][0], 4);
 }

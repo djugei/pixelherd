@@ -14,31 +14,10 @@ use rstar::primitives::PointWithData;
 use rstar::RTree;
 
 pub type BlipLoc = PointWithData<usize, [f64; 2]>;
-// the foodgrid is currently accessed in parallel. while there are no classical dataraces (to my
-// knowledge) the behaviour is different from a linear execution:
-// a "later" actor may have accessed and updated a field before an "earlier" one from a different
-// thread got to execute.
-// fixing that, and "determinizing" the rng would make
-// the execution entirely deterministic, which might be a desireable property.
-// to do so the food grid would need to store for each field the highest id that accessed it this
-// step.
-// if a blip tries to access a food grid field thats marked with a higher id than itself it needs
-// to undo that:
-// when accessing a field each blip stores the previous id.
-// when a blip detects a conflict, it follows the chain in order, re-calculating each blip,
-// then inserting its own modification at the appropriate location, and afterwards running all
-// blips with a higher id.
-// this is obviously quite expensive, and might even have to be done multiple times.
-// it _can_ be done in parallel though so if running it on the worker thread or on the main thread
-// (which would limit the number of times such a re-execution needs to happen to one/field) depends
-// on the expected contention and number of available cpus
-//
-// in the opposite instead of re-cacluating when noticing a concurrent access we could just
-// re-subtract from the new value if determinism is not a concern
-//
-// ... alternatively i could just always read last steps food grid and write into the new one,
-// accepting negatives
+// each step foodgrid is copied into a read only and a (synchronized) write-only part
 pub type FoodGrid = [[Atomic<f64>; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
+// safety: always change this in sync
+pub type OldFoodGrid = [[f64; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
 
 pub struct App<B: Brain + Send + Copy + Sync> {
     blips: Vec<Blip<B>>,
@@ -105,6 +84,13 @@ impl<B: Brain + Send + Copy + Sync> App<B> {
         let iter = new.par_iter_mut().zip(&self.blips);
         //let iter = new.iter_mut().zip(&self.blips);
 
+        let mut oldgrid: OldFoodGrid = [[0.; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
+        for (w, r) in oldgrid.iter_mut().zip(self.foodgrid.iter_mut()) {
+            for (w, r) in w.iter_mut().zip(r.iter_mut()) {
+                *w = *r.get_mut();
+            }
+        }
+
         // new is write only. if you need data from the last iteration
         // get it from old only.
         iter.for_each(|(new, old)| {
@@ -115,6 +101,7 @@ impl<B: Brain + Send + Copy + Sync> App<B> {
                 old,
                 &self.blips,
                 &self.tree,
+                &oldgrid,
                 &self.foodgrid,
                 self.time,
                 args.dt,

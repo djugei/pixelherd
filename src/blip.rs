@@ -8,11 +8,11 @@ use rstar::RTree;
 
 use crate::app::BlipLoc;
 use crate::app::FoodGrid;
+use crate::app::OldFoodGrid;
 
 use crate::vecmath;
 use crate::vecmath::Vector;
 
-use atomic::Atomic;
 use atomic::Ordering;
 
 #[derive(Clone, PartialEq)]
@@ -30,6 +30,7 @@ impl<B: Brain> Blip<B> {
         old: &Self,
         olds: &[Self],
         tree: &RTree<BlipLoc>,
+        oldgrid: &OldFoodGrid,
         foodgrid: &FoodGrid,
         time: f64,
         dt: f64,
@@ -95,34 +96,34 @@ impl<B: Brain> Blip<B> {
         ];
         let grid_slot = &foodgrid[gridpos[0]][gridpos[1]];
 
-        let casstat = Atomic::new(0usize);
+        let mut grid_value = oldgrid[gridpos[0]][gridpos[1]];
 
-        // there is no synchronization between threads, only the global food object
-        // so only the atomic operaton on it needs to be taken care of.
-        // there is no other operations to synchronize
-        // relaxed ordering should therefore be fine to my best knowledge
-        let mut grid_value = grid_slot.load(Ordering::Relaxed);
-        let mut outputs;
-        loop {
-            //todo: also smell distance from center of tile
-            // food is ~ 0-10+, scale to -5 to 5+
-            *inputs.smell_mut() = grid_value - 5.;
+        //todo: also smell distance from center of tile
+        // food is ~ 0-10+, scale to -5 to 5+
+        *inputs.smell_mut() = grid_value - 5.;
 
-            // inputs are processed at this point, time to feed the brain some data
-            outputs = old.genes.brain.think(&inputs);
+        // inputs are processed at this point, time to feed the brain some data
+        let outputs = old.genes.brain.think(&inputs);
 
-            // eat food
-            //todo: put into config
-            // can eat 10 food / second (arbitrary)
-            let max = 10. * dt;
-            // half consumption speed on basically empty square
-            // full consumption on 5 food, double on 15
-            let gridfactor = 0.5 + (grid_value / 10.);
-            // 1..11
-            let div = 1. + (outputs.speed() * 2.5);
-            let consumption = (max * gridfactor / div).min(grid_value);
-            if consumption > 0. && !consumption.is_nan() {
+        // eat food
+        //todo: put into config
+        // can eat 10 food / second (arbitrary)
+        let max = 10. * dt;
+        // half consumption speed on basically empty square
+        // full consumption on 5 food, double on 15
+        let gridfactor = 0.5 + (grid_value / 10.);
+        // 1..11
+        let div = 1. + (outputs.speed() * 2.5);
+        let consumption = (max * gridfactor / div).min(grid_value);
+        if consumption > 0. && !consumption.is_nan() {
+            // retry writing the delta
+            // todo: rename variables for clarity
+            loop {
                 let newval = grid_value - consumption;
+                // there is no synchronization between threads, only the global food object
+                // so only the atomic operaton on it needs to be taken care of.
+                // there is no other operations to synchronize
+                // relaxed ordering should therefore be fine to my best knowledge
                 match grid_slot.compare_exchange(
                     grid_value,
                     newval,
@@ -131,21 +132,17 @@ impl<B: Brain> Blip<B> {
                 ) {
                     Ok(_) => {
                         self.status.food += consumption;
+                        break;
                     }
                     Err(v) => {
                         //println!("{:?} had to reloop for cas", gridpos);
-                        casstat.fetch_add(1, Ordering::Relaxed);
                         grid_value = v;
                         continue;
                     }
                 }
             }
-            break;
         }
-        let casstat = casstat.into_inner();
-        if casstat > 1 {
-            println!("[{}]: had to cas-loop {} times", time, casstat);
-        }
+
         // can only digest 2 out of the 10 theoretical max consumption food
         let digest = self.status.food.min(2. * dt);
         self.status.food -= digest;

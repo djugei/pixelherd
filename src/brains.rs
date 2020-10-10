@@ -74,7 +74,11 @@ impl Outputs {
         // (0, MAX_SPEED)
         c * speedup
     }
-    // would be nice if there was an easy way to return &[f64;3] split of from the main array
+    // these are [-0.5, 0.5]
+    pub fn rgb_raw(&self) -> &[f64; 3] {
+        use std::convert::TryInto;
+        self.data[3..=5].try_into().unwrap()
+    }
     pub fn r(&self) -> f64 {
         self.data[3] + 0.5
     }
@@ -84,6 +88,11 @@ impl Outputs {
     pub fn g(&self) -> f64 {
         self.data[5] + 0.5
     }
+}
+#[test]
+fn rgbsize() {
+    let o = Outputs::default();
+    let rgb = o.rgb_raw();
 }
 
 pub trait Brain: Clone {

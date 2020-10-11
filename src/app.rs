@@ -2,6 +2,7 @@ use crate::config;
 
 use crate::blip::Blip;
 use crate::brains::Brain;
+use crate::stablevec::StableVec;
 use crate::vecmath;
 use crate::vecmath::Vector;
 use atomic::Atomic;
@@ -20,8 +21,9 @@ pub type FoodGrid = [[Atomic<f64>; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
 pub type OldFoodGrid = [[f64; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
 
 pub struct App<B: Brain + Send + Copy + Sync> {
-    blips: Vec<Blip<B>>,
+    blips: StableVec<Blip<B>>,
     foodgrid: FoodGrid,
+    // todo: replace with a simple sorted list
     tree: RTree<BlipLoc>,
     time: f64,
 }
@@ -33,7 +35,7 @@ impl<B: Brain + Send + Copy + Sync> App<B> {
     pub fn tree(&self) -> &RTree<BlipLoc> {
         &self.tree
     }
-    pub fn blips(&self) -> &[Blip<B>] {
+    pub fn blips(&self) -> &StableVec<Blip<B>> {
         &self.blips
     }
     pub fn new<R: Rng>(mut rng: R) -> Self {
@@ -51,7 +53,7 @@ impl<B: Brain + Send + Copy + Sync> App<B> {
 
         // Create a new game and run it.
         let mut app = App {
-            blips: Vec::with_capacity(config::INITIAL_CELLS),
+            blips: StableVec::with_capacity(config::INITIAL_CELLS),
             tree: RTree::new(),
             foodgrid,
             time: 0.,
@@ -81,7 +83,7 @@ impl<B: Brain + Send + Copy + Sync> App<B> {
         let spawns = std::sync::Mutex::new(Vec::new());
 
         //perf: benchmarks if more cpu = more speed
-        let iter = new.par_iter_mut().zip(&self.blips);
+        let iter = new.inner_mut().par_iter_mut().zip(self.blips.inner());
         //let iter = new.iter_mut().zip(&self.blips);
 
         let mut oldgrid: OldFoodGrid = [[0.; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
@@ -93,7 +95,7 @@ impl<B: Brain + Send + Copy + Sync> App<B> {
 
         // new is write only. if you need data from the last iteration
         // get it from old only.
-        iter.for_each(|(new, old)| {
+        iter.flatten().for_each(|(new, old)| {
             // todo: figure out how to pass rng into other threads
             let mut rng = rand::thread_rng();
             let spawn = new.update(
@@ -141,16 +143,13 @@ impl<B: Brain + Send + Copy + Sync> App<B> {
         }
 
         // move blips
-        let iter = self.blips.par_iter_mut();
-        iter.for_each(|blip| blip.motion(args.dt));
+        let iter = self.blips.inner_mut().par_iter_mut();
+        iter.flatten().for_each(|blip| blip.motion(args.dt));
 
         // update tree
-        // todo: maybe this can be done smarter, instead of completely
-        // rebuilding the tree it could be updated, keeping most of its structure
         let tree = self
             .blips
-            .iter()
-            .enumerate()
+            .iter_indexed()
             .inspect(|(_, b)| {
                 assert!(!b.status.pos[0].is_nan());
                 assert!(!b.status.pos[1].is_nan())
@@ -165,21 +164,36 @@ impl<B: Brain + Send + Copy + Sync> App<B> {
         if num == 0 {
             println!("no blips at all");
         } else {
-            let age = self.blips[Selection::Age
-                .select(&self.blips, &self.tree, &[0., 0.])
-                .unwrap()]
-            .status
-            .age;
-            let generation = self.blips[Selection::Generation
-                .select(&self.blips, &self.tree, &[0., 0.])
-                .unwrap()]
-            .status
-            .generation;
-            let spawns = self.blips[Selection::Spawns
-                .select(&self.blips, &self.tree, &[0., 0.])
-                .unwrap()]
-            .status
-            .children;
+            let age = self
+                .blips
+                .get(
+                    Selection::Age
+                        .select(self.blips.iter_indexed(), &self.tree, &[0., 0.])
+                        .unwrap(),
+                )
+                .unwrap()
+                .status
+                .age;
+            let generation = self
+                .blips
+                .get(
+                    Selection::Generation
+                        .select(self.blips.iter_indexed(), &self.tree, &[0., 0.])
+                        .unwrap(),
+                )
+                .unwrap()
+                .status
+                .generation;
+            let spawns = self
+                .blips
+                .get(
+                    Selection::Spawns
+                        .select(self.blips.iter_indexed(), &self.tree, &[0., 0.])
+                        .unwrap(),
+                )
+                .unwrap()
+                .status
+                .children;
 
             let food: f64 = self
                 .foodgrid

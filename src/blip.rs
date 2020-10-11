@@ -13,6 +13,8 @@ use crate::app::OldFoodGrid;
 use crate::vecmath;
 use crate::vecmath::Vector;
 
+use crate::stablevec::StableVec;
+
 use atomic::Ordering;
 
 #[derive(Clone, PartialEq)]
@@ -28,7 +30,7 @@ impl<B: Brain> Blip<B> {
         &mut self,
         mut rng: R,
         old: &Self,
-        olds: &[Self],
+        olds: &StableVec<Self>,
         tree: &RTree<BlipLoc>,
         oldgrid: &OldFoodGrid,
         foodgrid: &FoodGrid,
@@ -52,7 +54,7 @@ impl<B: Brain> Blip<B> {
 
         for (p, dist_squared) in search {
             // sound
-            let nb = &olds[p.data];
+            let nb = &olds.get(p.data).unwrap();
 
             // todo: get rid of sqrt
             let nb_sound = (nb.status.vel[0] * nb.status.vel[0])
@@ -70,7 +72,7 @@ impl<B: Brain> Blip<B> {
             }
             for (&(dis, angle, id), inp) in eyedists.iter().zip(inputs.eyes_mut().iter_mut()) {
                 if dis != f64::INFINITY {
-                    let nb = &olds[id];
+                    let nb = &olds.get(id).unwrap();
                     let rgb = nb.status.rgb;
                     let write = [
                         rgb[0] as f64 - 0.5,

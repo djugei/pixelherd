@@ -28,6 +28,8 @@ use blip::Blip;
 mod select;
 use select::Selection;
 
+mod stablevec;
+
 mod app;
 use app::App;
 

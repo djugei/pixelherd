@@ -33,41 +33,34 @@ impl Selection {
     }
 
     /// mousepos needs to be scaled to simulation coordinates already
-    pub fn select<B: Brain>(
+    pub fn select<'a, I, B: 'a + Brain>(
         self,
-        blips: &[Blip<B>],
+        blips: I,
         tree: &RTree<BlipLoc>,
         mousepos: &[f64; 2],
-    ) -> Option<usize> {
+    ) -> Option<usize>
+    where
+        I: Iterator<Item = (usize, &'a Blip<B>)>,
+    {
         match self {
             Selection::None => None,
             Selection::Bigboy => blips
-                .iter()
-                .enumerate()
                 .map(|(i, b)| (i, b.status.hp + b.status.food))
                 .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
                 .map(|c| c.0),
             Selection::Age => blips
-                .iter()
-                .enumerate()
                 .map(|(i, b)| (i, b.status.age))
                 .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
                 .map(|c| c.0),
             Selection::Young => blips
-                .iter()
-                .enumerate()
                 .map(|(i, b)| (i, b.status.age))
                 .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
                 .map(|c| c.0),
             Selection::Spawns => blips
-                .iter()
-                .enumerate()
                 .map(|(i, b)| (i, b.status.children))
                 .max_by(|a, b| a.1.cmp(&b.1))
                 .map(|c| c.0),
             Selection::Generation => blips
-                .iter()
-                .enumerate()
                 .map(|(i, b)| (i, b.status.generation))
                 .max_by(|a, b| a.1.cmp(&b.1))
                 .map(|c| c.0),

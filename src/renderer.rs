@@ -13,6 +13,7 @@ pub struct Renderer {
     pub selection: Selection,
 }
 impl Renderer {
+    // todo: add brain visualisation
     pub fn render<C, B>(&mut self, app: &App<B>, args: &RenderArgs, glyph_cache: &mut C)
     where
         C: graphics::character::CharacterCache<Texture = opengl_graphics::Texture>,
@@ -63,8 +64,8 @@ impl Renderer {
         let sim_y = self.mousepos[1] * config::SIM_HEIGHT / height;
         let marker = self
             .selection
-            .select(app.blips(), app.tree(), &[sim_x, sim_y]);
-        for (index, blip) in app.blips().iter().enumerate() {
+            .select(app.blips().iter_indexed(), app.tree(), &[sim_x, sim_y]);
+        for (index, blip) in app.blips().iter_indexed() {
             let (px, py) = (blip.status.pos[0], blip.status.pos[1]);
             let (pdx, pdy) = (blip.status.vel[0], blip.status.vel[1]);
             let pos_transform = c.transform.trans(

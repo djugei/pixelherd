@@ -97,9 +97,18 @@ impl<T> StableVec<T> {
     pub fn len(&self) -> usize {
         self.inner.iter().flatten().count()
     }
+    /// iterator over all the empty slots
+    /// every element of this will be None (i.e. .next() returns Some(None) or None)
+    fn empty_iter_mut(&mut self) -> impl Iterator<Item = (usize, &mut Option<T>)> {
+        self.inner
+            .iter_mut()
+            .enumerate()
+            .filter(|(_i, e)| e.is_none())
+    }
 }
 impl<T> std::iter::Extend<T> for StableVec<T> {
     /// this is strictly more performant than calling add multiple times
+    //todo: implement an extend-iter that -> impl Iterator<T=usize> with all the new positions
     fn extend<I>(&mut self, new: I)
     where
         I: IntoIterator<Item = T>,

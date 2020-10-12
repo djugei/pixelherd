@@ -3,18 +3,17 @@ use crate::config;
 use crate::blip::Blip;
 use crate::brains::Brain;
 use crate::stablevec::StableVec;
-use crate::vecmath;
-use crate::vecmath::Vector;
+use anti_r::vec::SpatVec;
+use anti_r::SpatSlice;
 use atomic::Atomic;
 use piston::input::UpdateArgs;
 use rand::Rng;
 use rayon::prelude::IndexedParallelIterator;
 use rayon::prelude::IntoParallelRefMutIterator;
 use rayon::prelude::ParallelIterator;
-use rstar::primitives::PointWithData;
-use rstar::RTree;
 
-pub type BlipLoc = PointWithData<usize, [f64; 2]>;
+pub type Tree = SpatVec<[f64; 2], usize>;
+pub type TreeRef<'a> = SpatSlice<'a, [f64; 2], usize>;
 // each step foodgrid is copied into a read only and a (synchronized) write-only part
 pub type FoodGrid = [[Atomic<f64>; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
 // safety: always change this in sync
@@ -24,7 +23,7 @@ pub struct App<B: Brain + Send + Copy + Sync> {
     blips: StableVec<Blip<B>>,
     foodgrid: FoodGrid,
     // todo: replace with a simple sorted list
-    tree: RTree<BlipLoc>,
+    tree: Tree,
     time: f64,
 }
 
@@ -32,8 +31,8 @@ impl<B: Brain + Send + Copy + Sync> App<B> {
     pub fn foodgrid(&self) -> &FoodGrid {
         &self.foodgrid
     }
-    pub fn tree(&self) -> &RTree<BlipLoc> {
-        &self.tree
+    pub fn tree<'a>(&'a self) -> TreeRef<'a> {
+        (&self.tree).into()
     }
     pub fn blips(&self) -> &StableVec<Blip<B>> {
         &self.blips
@@ -54,7 +53,7 @@ impl<B: Brain + Send + Copy + Sync> App<B> {
         // Create a new game and run it.
         let mut app = App {
             blips: StableVec::with_capacity(config::INITIAL_CELLS),
-            tree: RTree::new(),
+            tree: SpatVec::new_from(Vec::with_capacity(config::INITIAL_CELLS)),
             foodgrid,
             time: 0.,
         };
@@ -82,9 +81,18 @@ impl<B: Brain + Send + Copy + Sync> App<B> {
 
         let spawns = std::sync::Mutex::new(Vec::new());
 
-        //perf: benchmarks if more cpu = more speed
-        let iter = new.inner_mut().par_iter_mut().zip(self.blips.inner());
-        //let iter = new.iter_mut().zip(&self.blips);
+        let iter = new
+            .inner_mut()
+            .par_iter_mut()
+            .zip(self.blips.inner())
+            .flatten();
+        /*
+        let iter = new
+            .inner_mut()
+            .iter_mut()
+            .flatten()
+            .zip(self.blips.inner().iter().flatten());
+            */
 
         let mut oldgrid: OldFoodGrid = [[0.; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
         for (w, r) in oldgrid.iter_mut().zip(self.foodgrid.iter_mut()) {
@@ -95,14 +103,14 @@ impl<B: Brain + Send + Copy + Sync> App<B> {
 
         // new is write only. if you need data from the last iteration
         // get it from old only.
-        iter.flatten().for_each(|(new, old)| {
+        iter.for_each(|(new, old)| {
             // todo: figure out how to pass rng into other threads
             let mut rng = rand::thread_rng();
             let spawn = new.update(
                 &mut rng,
                 old,
                 &self.blips,
-                &self.tree,
+                self.tree(),
                 &oldgrid,
                 &self.foodgrid,
                 self.time,
@@ -144,6 +152,7 @@ impl<B: Brain + Send + Copy + Sync> App<B> {
 
         // move blips
         let iter = self.blips.inner_mut().par_iter_mut();
+        //let iter = self.blips.inner_mut().iter_mut();
         iter.flatten().for_each(|blip| blip.motion(args.dt));
 
         // update tree
@@ -154,9 +163,9 @@ impl<B: Brain + Send + Copy + Sync> App<B> {
                 assert!(!b.status.pos[0].is_nan());
                 assert!(!b.status.pos[1].is_nan())
             })
-            .map(|(p, b)| BlipLoc::new(p, b.status.pos))
+            .map(|(index, b)| (b.status.pos, index))
             .collect();
-        self.tree = RTree::bulk_load(tree);
+        self.tree = SpatVec::new_from(tree);
     }
     pub fn report(&self) {
         use crate::select::Selection;
@@ -168,7 +177,7 @@ impl<B: Brain + Send + Copy + Sync> App<B> {
                 .blips
                 .get(
                     Selection::Age
-                        .select(self.blips.iter_indexed(), &self.tree, &[0., 0.])
+                        .select(self.blips.iter_indexed(), self.tree(), &[0., 0.])
                         .unwrap(),
                 )
                 .unwrap()
@@ -178,7 +187,7 @@ impl<B: Brain + Send + Copy + Sync> App<B> {
                 .blips
                 .get(
                     Selection::Generation
-                        .select(self.blips.iter_indexed(), &self.tree, &[0., 0.])
+                        .select(self.blips.iter_indexed(), self.tree(), &[0., 0.])
                         .unwrap(),
                 )
                 .unwrap()
@@ -188,7 +197,7 @@ impl<B: Brain + Send + Copy + Sync> App<B> {
                 .blips
                 .get(
                     Selection::Spawns
-                        .select(self.blips.iter_indexed(), &self.tree, &[0., 0.])
+                        .select(self.blips.iter_indexed(), self.tree(), &[0., 0.])
                         .unwrap(),
                 )
                 .unwrap()
@@ -212,20 +221,4 @@ impl<B: Brain + Send + Copy + Sync> App<B> {
             println!("average food       : {}", avg_food);
         }
     }
-}
-
-pub fn locate_in_radius(
-    tree: &RTree<BlipLoc>,
-    center: Vector,
-    env: f64,
-) -> impl Iterator<Item = (&BlipLoc, f64)> {
-    let lu = vecmath::add(center, [-env, -env]);
-    let rd = vecmath::add(center, [env, env]);
-
-    let bb = rstar::AABB::from_corners(lu, rd);
-
-    use rstar::PointDistance;
-    tree.locate_in_envelope(&bb)
-        .map(move |p| (p, p.position().distance_2(&center)))
-        .filter(move |(_p, d)| *d <= env)
 }

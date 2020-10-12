@@ -1,4 +1,3 @@
-use crate::app::locate_in_radius;
 use crate::app::App;
 use crate::blip;
 use crate::config;
@@ -75,9 +74,9 @@ impl Renderer {
             let transform = pos_transform.orient(pdx, pdy).rot_deg(90.);
             if Some(index) == marker {
                 polygon(blip.status.rgb, TRI, transform.zoom(2.), gl);
-
-                let search = locate_in_radius(&app.tree(), blip.status.pos, config::b::LOCAL_ENV)
-                    .filter(|(p, _)| *p.position() != blip.status.pos)
+                let tree = app.tree();
+                let search = tree
+                    .query_distance(&blip.status.pos, config::b::LOCAL_ENV)
                     .collect::<Vec<_>>();
 
                 const RECT: [f64; 4] = [-5., -5., 10., 10.];
@@ -88,12 +87,11 @@ impl Renderer {
                 for (eye, col) in blip.genes.eyes.iter().zip(col.iter()) {
                     let eye_angle = blip::eye_angle(base_angle, *eye);
                     let visual_fov = 0.2 * PI;
-                    let eyesearch = search.iter().filter(|(p, _d)| {
-                        blip::eye_vision(&blip.status, eye_angle, *p.position()).abs() < visual_fov
+                    let eyesearch = search.iter().filter(|(_d, (p, _index))| {
+                        blip::eye_vision(&blip.status, eye_angle, *p).abs() < visual_fov
                     });
 
-                    for (p, _) in eyesearch {
-                        let p = *p.position();
+                    for (_d, (p, _index)) in eyesearch {
                         let t = c.transform.trans(
                             p[0] / config::SIM_WIDTH * width,
                             p[1] / config::SIM_HEIGHT * height,

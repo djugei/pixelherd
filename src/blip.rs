@@ -4,11 +4,9 @@ use rand::Rng;
 use crate::brains;
 use crate::brains::Brain;
 
-use rstar::RTree;
-
-use crate::app::BlipLoc;
 use crate::app::FoodGrid;
 use crate::app::OldFoodGrid;
+use crate::app::TreeRef;
 
 use crate::vecmath;
 use crate::vecmath::Vector;
@@ -31,7 +29,7 @@ impl<B: Brain> Blip<B> {
         mut rng: R,
         old: &Self,
         olds: &StableVec<Self>,
-        tree: &RTree<BlipLoc>,
+        tree: TreeRef,
         oldgrid: &OldFoodGrid,
         foodgrid: &FoodGrid,
         time: f64,
@@ -42,8 +40,7 @@ impl<B: Brain> Blip<B> {
     {
         let mut inputs: brains::Inputs = Default::default();
 
-        let search = crate::app::locate_in_radius(tree, self.status.pos, config::b::LOCAL_ENV)
-            .filter(|(p, _d)| p.position() != &old.status.pos);
+        let search = tree.query_distance(&self.status.pos, config::b::LOCAL_ENV);
 
         let base_angle = base_angle(&self.status);
         let mut eyedists = [(f64::INFINITY, 0., 0); config::b::N_EYES];
@@ -52,9 +49,9 @@ impl<B: Brain> Blip<B> {
             eye_angles[i] = eye_angle(base_angle, self.genes.eyes[i]);
         }
 
-        for (p, dist_squared) in search {
+        for (dist_squared, (_p, index)) in search {
             // sound
-            let nb = &olds.get(p.data).unwrap();
+            let nb = &olds.get(*index).unwrap();
 
             // todo: get rid of sqrt
             let nb_sound = (nb.status.vel[0] * nb.status.vel[0])
@@ -67,7 +64,7 @@ impl<B: Brain> Blip<B> {
                 let angle = eye_vision(&self.status, *eye, nb.status.pos);
                 // see the closest one in fov
                 if angle.abs() < fov && eyedists[i].0 > dist_squared {
-                    eyedists[i] = (dist_squared, angle, p.data);
+                    eyedists[i] = (dist_squared, angle, *index);
                 }
             }
             for (&(dis, angle, id), inp) in eyedists.iter().zip(inputs.eyes_mut().iter_mut()) {

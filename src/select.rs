@@ -1,7 +1,6 @@
-use crate::app::BlipLoc;
+use crate::app::TreeRef;
 use crate::brains::Brain;
 use crate::Blip;
-use rstar::RTree;
 
 #[derive(Clone, Copy, Debug)]
 pub enum Selection {
@@ -36,7 +35,7 @@ impl Selection {
     pub fn select<'a, I, B: 'a + Brain>(
         self,
         blips: I,
-        tree: &RTree<BlipLoc>,
+        tree: TreeRef,
         mousepos: &[f64; 2],
     ) -> Option<usize>
     where
@@ -64,7 +63,13 @@ impl Selection {
                 .map(|(i, b)| (i, b.status.generation))
                 .max_by(|a, b| a.1.cmp(&b.1))
                 .map(|c| c.0),
-            Selection::Mouse => tree.nearest_neighbor(mousepos).map(|r| r.data),
+            Selection::Mouse => {
+                // the anti_r is not very good at this operation
+                use crate::config;
+                tree.query_distance(mousepos, config::b::LOCAL_ENV * 10.)
+                    .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
+                    .map(|(_d, (_p, i))| *i)
+            }
         }
     }
 }

@@ -1,7 +1,7 @@
 #![allow(unused)]
 /// a vec-like structure where removes do not disturb the indices of other elements
 /// basically Vec<Option<T>>
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq)]
 pub struct StableVec<T> {
     inner: Vec<Option<T>>,
 }

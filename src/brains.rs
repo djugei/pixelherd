@@ -195,7 +195,7 @@ impl Brain for BigBrain {
     }
 }
 
-#[derive(Copy, Clone, Default, PartialEq)]
+#[derive(Copy, Clone, Default, PartialEq, Debug)]
 pub struct SimpleBrain {
     // each output gets a weight for each input
     weights: [[f64; N_INPUTS]; INNER_SIZE],

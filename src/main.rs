@@ -3,6 +3,9 @@
 // 7. add state, both for pausing/resuming simulation and for extracting successful specimen
 // 8. add carnivores, currently the simulation is undergoing boom- and bust-cycles, predators fix
 //    that a bit
+// 9. make deterministic (this should be as simple as passing and seeding rngs)
+//    turns out its not that easy, cause with floats a+b+c != a+c+b so execution order actually
+//    matters. gotta search how to do commutative floats or roll my own int/const "float"
 
 use opengl_graphics::{GlGraphics, OpenGL};
 use sdl2_window::Sdl2Window as Window;
@@ -62,9 +65,7 @@ fn main() {
         .build()
         .unwrap();
 
-    let mut rng = rand::thread_rng();
-
-    let mut app = App::<brains::SimpleBrain>::new(&mut rng);
+    let mut app = App::<brains::SimpleBrain>::new(1234);
     let mut render = Renderer {
         gl: GlGraphics::new(opengl),
         mousepos: [0.; 2],
@@ -155,7 +156,7 @@ fn main() {
                 let times = if hyper { 1000 * speed } else { speed };
                 // always running fixed step now, for the determinism
                 for _ in 0..times {
-                    app.update(&UpdateArgs { dt: 0.02 }, &mut rng);
+                    app.update(&UpdateArgs { dt: 0.02 });
                 }
             }
         }

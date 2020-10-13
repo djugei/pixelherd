@@ -15,7 +15,7 @@ use crate::stablevec::StableVec;
 
 use atomic::Ordering;
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct Blip<B: Brain> {
     /// things that change during the lifetime of a blip
     pub status: Status,
@@ -259,7 +259,7 @@ impl<B: Brain> Blip<B> {
     }
 }
 
-#[derive(Clone, PartialEq, Default)]
+#[derive(Clone, PartialEq, Default, Debug)]
 pub struct Status {
     pub pos: [f64; 2],
     pub vel: [f64; 2],
@@ -272,7 +272,7 @@ pub struct Status {
     pub rgb: [f32; 4],
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub struct Genes<B: Brain> {
     pub brain: B,
     pub mutation_rate: f64,

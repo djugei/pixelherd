@@ -16,6 +16,7 @@ piston2d-opengl_graphics = "*"
 
 
 rand = "*"
+rand_chacha = "*"
 inline_tweak = "*"
 
 

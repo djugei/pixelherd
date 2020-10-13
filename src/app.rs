@@ -22,7 +22,7 @@ pub type FoodGrid = [[Atomic<f64>; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
 pub type OldFoodGrid = [[f64; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
 
 #[derive(Debug)]
-pub struct App<B: Brain + Send + Copy + Sync> {
+pub struct App<B: Brain + Send + Clone + Sync> {
     blips: StableVec<Blip<B>>,
     foodgrid: FoodGrid,
     // todo: replace with a simple sorted list
@@ -31,7 +31,7 @@ pub struct App<B: Brain + Send + Copy + Sync> {
     rng: DetRng,
 }
 
-impl<B: Brain + Send + Copy + Sync> App<B> {
+impl<B: Brain + Send + Clone + Sync> App<B> {
     pub fn foodgrid(&self) -> &FoodGrid {
         &self.foodgrid
     }
@@ -169,6 +169,8 @@ impl<B: Brain + Send + Copy + Sync> App<B> {
         iter.flatten().for_each(|blip| blip.motion(args.dt));
 
         // update tree
+        // todo: instead of re-building on each iteration i should update it
+        // the blips have stable indices specifically for this usecase
         let tree = self
             .blips
             .iter_indexed()

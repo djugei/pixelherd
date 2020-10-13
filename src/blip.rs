@@ -15,8 +15,11 @@ use crate::stablevec::StableVec;
 
 use atomic::Ordering;
 
-#[derive(Clone, PartialEq, Debug)]
-pub struct Blip<B: Brain> {
+#[derive(Clone, Copy, PartialEq, Debug)]
+// todo: as only status changes (and is kinda small) and genes do not change (and are kinad big
+// cause of the brain) it might be smart to separate them, so the genes do not need to be copied on
+// every execution
+pub struct Blip<B: Brain + Clone> {
     /// things that change during the lifetime of a blip
     pub status: Status,
     /// things that only change trough mutation during reproduction
@@ -34,10 +37,7 @@ impl<B: Brain> Blip<B> {
         foodgrid: &FoodGrid,
         time: f64,
         dt: f64,
-    ) -> Option<Self>
-    where
-        B: Copy,
-    {
+    ) -> Option<Self> {
         let mut inputs: brains::Inputs = Default::default();
 
         let search = tree.query_distance(&self.status.pos, config::b::LOCAL_ENV);
@@ -240,10 +240,7 @@ impl<B: Brain> Blip<B> {
             genes: Genes::new(&mut rng),
         }
     }
-    pub fn split<R: Rng>(&mut self, mut rng: R) -> Self
-    where
-        B: Clone + Copy,
-    {
+    pub fn split<R: Rng>(&mut self, mut rng: R) -> Self {
         self.status.hp /= 2.;
         self.status.children += 1;
         let mut new = self.clone();
@@ -259,7 +256,7 @@ impl<B: Brain> Blip<B> {
     }
 }
 
-#[derive(Clone, PartialEq, Default, Debug)]
+#[derive(Copy, Clone, PartialEq, Default, Debug)]
 pub struct Status {
     pub pos: [f64; 2],
     pub vel: [f64; 2],
@@ -303,10 +300,7 @@ impl<B: Brain> Genes<B> {
         }
     }
 
-    fn mutate<R: Rng>(&self, mut rng: R) -> Self
-    where
-        B: Copy,
-    {
+    fn mutate<R: Rng>(&self, mut rng: R) -> Self {
         //let mut new = self.clone();
         let mut brain = self.brain.clone();
         brain.mutate(&mut rng, self.mutation_rate);

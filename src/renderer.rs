@@ -17,7 +17,7 @@ impl Renderer {
     where
         C: graphics::character::CharacterCache<Texture = opengl_graphics::Texture>,
         <C as graphics::character::CharacterCache>::Error: std::fmt::Debug,
-        B: crate::brains::Brain + Send + Copy + Sync,
+        B: crate::brains::Brain + Send + Sync,
     {
         use graphics::*;
 

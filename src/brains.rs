@@ -247,6 +247,48 @@ impl Brain for SimpleBrain {
     }
 }
 
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct BoxBrain<B: Brain> {
+    b: Box<B>,
+}
+
+impl<B: Brain> Brain for BoxBrain<B> {
+    fn mutate<R: Rng>(&mut self, rng: R, rate: f64) {
+        self.b.mutate(rng, rate)
+    }
+    fn init<R: Rng>(r: R) -> Self {
+        Self {
+            b: Box::new(B::init(r)),
+        }
+    }
+    fn think(&self, inputs: &Inputs) -> Outputs {
+        self.b.think(inputs)
+    }
+}
+
+// this is a hack pending restructuring blip into a static and dynamic part
+// (i.e. store separate state and genes)
+use std::sync::Arc;
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct ArcBrain<B: Brain> {
+    b: Arc<B>,
+}
+
+impl<B: Brain> Brain for ArcBrain<B> {
+    fn mutate<R: Rng>(&mut self, rng: R, rate: f64) {
+        // make mut copies the arcs content, basically creating a new arc
+        Arc::make_mut(&mut self.b).mutate(rng, rate)
+    }
+    fn init<R: Rng>(r: R) -> Self {
+        Self {
+            b: Arc::new(B::init(r)),
+        }
+    }
+    fn think(&self, inputs: &Inputs) -> Outputs {
+        self.b.think(inputs)
+    }
+}
+
 #[test]
 fn arrayacc() {
     let arr = [0, 1, 2, 3, 4, 5, 6, 7];

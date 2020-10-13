@@ -65,7 +65,7 @@ fn main() {
         .build()
         .unwrap();
 
-    let mut app = App::<brains::SimpleBrain>::new(1234);
+    let mut app = App::<brains::ArcBrain<brains::SimpleBrain>>::new(1234);
     let mut render = Renderer {
         gl: GlGraphics::new(opengl),
         mousepos: [0.; 2],
@@ -164,6 +164,11 @@ fn main() {
 }
 
 #[test]
+fn boolsize() {
+    assert_eq!(std::mem::size_of::<bool>(), 1);
+}
+
+#[test]
 fn test_atomic() {
     use atomic::Atomic;
     use std::mem::{align_of, size_of};
@@ -197,4 +202,42 @@ fn test_atomic() {
     // i.e. (f32,f32) and [f32;2] do not work
     dbg!(base, split1, split2, force, Atomic::<i128>::is_lock_free());
     assert!(Atomic::<Force>::is_lock_free());
+}
+
+#[test]
+#[ignore]
+fn bench_brains() {
+    // this is a poor mans benchmark because i didn't want to set up criterion for literally one
+    // testcase and the std bench feature is nightly
+    let times = 10_000;
+    use std::time::Instant;
+
+    use crate::brains::ArcBrain;
+    use crate::brains::BoxBrain;
+    use crate::brains::SimpleBrain;
+
+    let mut app1 = App::<SimpleBrain>::new(1234);
+    let before = Instant::now();
+    for _ in 0..times {
+        app1.update(&UpdateArgs { dt: 0.02 });
+    }
+    let app1 = before.elapsed().as_millis();
+
+    let mut app2 = App::<BoxBrain<SimpleBrain>>::new(1234);
+    let before = Instant::now();
+    for _ in 0..times {
+        app2.update(&UpdateArgs { dt: 0.02 });
+    }
+    let app2 = before.elapsed().as_millis();
+
+    let mut app3 = App::<ArcBrain<SimpleBrain>>::new(1234);
+    let before = Instant::now();
+    for _ in 0..times {
+        app3.update(&UpdateArgs { dt: 0.02 });
+    }
+    let app3 = before.elapsed().as_millis();
+
+    println!("app1: {}mili", app1);
+    println!("app2: {}mili", app2);
+    println!("app3: {}mili", app3);
 }

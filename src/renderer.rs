@@ -52,6 +52,7 @@ impl Renderer {
                     // relaxed ordering should be fine, nobody should really be accessing the app
                     // during render
                     .load(atomic::Ordering::Relaxed)
+                    .to_f64()
                     .min(10.)
                     / 10.;
                 rectangle([0.0, 1.0, 0.0, trans as f32], SQR, transform, gl);

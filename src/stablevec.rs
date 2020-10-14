@@ -26,8 +26,7 @@ impl<T> StableVec<T> {
             .inner
             .iter_mut()
             .enumerate()
-            .filter(|(_i, e)| e.is_none())
-            .next();
+            .find(|(_i, e)| e.is_none());
         if let Some((i, empty)) = empty {
             *empty = Some(e);
             i

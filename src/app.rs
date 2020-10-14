@@ -6,6 +6,7 @@ use crate::stablevec::StableVec;
 use anti_r::vec::SpatVec;
 use anti_r::SpatSlice;
 use atomic::Atomic;
+use fix_rat::TenRat;
 use piston::input::UpdateArgs;
 use rand::Rng;
 use rand::SeedableRng;
@@ -14,12 +15,19 @@ use rayon::prelude::IndexedParallelIterator;
 use rayon::prelude::IntoParallelRefMutIterator;
 use rayon::prelude::ParallelIterator;
 
+#[test]
+fn tenrat_atomic() {
+    assert!(Atomic::<TenRat>::is_lock_free());
+}
 pub type Tree = SpatVec<[f64; 2], usize>;
 pub type TreeRef<'a> = SpatSlice<'a, [f64; 2], usize>;
+
+// using TenRat instead of f64 here to get associativity, which is important cause of multithreading
+// todo: consider creating a real type for the foodgrid
 // each step foodgrid is copied into a read only and a (synchronized) write-only part
-pub type FoodGrid = [[Atomic<f64>; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
+pub type FoodGrid = [[Atomic<TenRat>; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
 // safety: always change this in sync
-pub type OldFoodGrid = [[f64; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
+pub type OldFoodGrid = [[TenRat; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
 
 #[derive(Debug)]
 pub struct App<B: Brain + Send + Clone + Sync> {
@@ -35,7 +43,7 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
     pub fn foodgrid(&self) -> &FoodGrid {
         &self.foodgrid
     }
-    pub fn tree<'a>(&'a self) -> TreeRef<'a> {
+    pub fn tree(&self) -> TreeRef<'_> {
         (&self.tree).into()
     }
     pub fn blips(&self) -> &StableVec<Blip<B>> {
@@ -43,7 +51,8 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
     }
     pub fn new(seed: u64) -> Self {
         let rng = DetRng::seed_from_u64(seed);
-        let foodgrid = [[0.; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
+        let foodgrid: OldFoodGrid =
+            [[TenRat::from_int(0); config::FOOD_HEIGHT]; config::FOOD_WIDTH];
         //safety: this is absolutely not safe as i am relying on the internal memory layout of a third
         // party library that is almost guaranteed to not match on 32 bit platforms.
         //
@@ -61,7 +70,7 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
             tree: SpatVec::new_from(Vec::with_capacity(config::INITIAL_CELLS)),
             foodgrid,
             time: 0.,
-            rng: rng,
+            rng,
         };
 
         for _ in 0..config::INITIAL_CELLS {
@@ -72,7 +81,7 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
             for h in 0..config::FOOD_HEIGHT {
                 //fixme: this should be an exponential distribution instead
                 if app.rng.gen_range(0, 3) == 1 {
-                    *app.foodgrid[w][h].get_mut() = app.rng.gen_range(0., 10.);
+                    *app.foodgrid[w][h].get_mut() = app.rng.gen_range(0., 10.).into();
                 }
             }
         }
@@ -103,10 +112,15 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
                 }
             });
 
-        let mut oldgrid: OldFoodGrid = [[0.; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
+        let mut oldgrid: OldFoodGrid = [[TenRat::from(0); config::FOOD_HEIGHT]; config::FOOD_WIDTH];
         for (w, r) in oldgrid.iter_mut().zip(self.foodgrid.iter_mut()) {
             for (w, r) in w.iter_mut().zip(r.iter_mut()) {
-                *w = *r.get_mut();
+                // clamp to valid range on each iteration
+                // datatype is valid from -16 to 16
+                // but 0-10 is the only sensible value range for application domain
+                // this is important for determinism as saturations/wraparounds break determinism
+                // (well except we only do subtraction, so saturating would be fine)
+                *w = (*r.get_mut()).clamp((-1).into(), 12.into());
             }
         }
 
@@ -155,10 +169,11 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
             if self.rng.gen_bool(chance.min(1.)) {
                 let w: usize = self.rng.gen_range(0, config::FOOD_WIDTH);
                 let h: usize = self.rng.gen_range(0, config::FOOD_HEIGHT);
+                let grid = self.foodgrid[w][h].get_mut();
                 // expected: 4, chances is divided by 4
                 // trying to get a less uniform food distribution
-                let f: f64 = self.rng.gen_range(3., 5.);
-                *self.foodgrid[w][h].get_mut() += f;
+                let f: TenRat = self.rng.gen_range(3., 5.).into();
+                *grid = *grid + f;
             }
             chance -= 1.;
         }
@@ -224,10 +239,12 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
                 .foodgrid
                 .iter()
                 .flat_map(|a| a.iter())
-                .map(|c| c.load(atomic::Ordering::Relaxed))
+                .map(|c| c.load(atomic::Ordering::Relaxed).to_f64())
                 .sum();
 
-            let avg_food = food / ((config::FOOD_HEIGHT * config::FOOD_WIDTH) as f64);
+            let fields = (config::FOOD_HEIGHT * config::FOOD_WIDTH) as f64;
+
+            let avg_food = food / fields;
 
             println!("number of blips    : {}", num);
             println!("oldest             : {}", age);
@@ -260,22 +277,36 @@ where
 }
 
 #[test]
-// this currently fails because floats are not commutative (a+b) + c != (a+c) + b
 fn determinism() {
     use crate::brains::SimpleBrain;
     let mut app1 = App::<SimpleBrain>::new(1234);
     let mut app2 = App::<SimpleBrain>::new(1234);
 
-    for _ in 0..1_000_000 {
+    for i in 0..100_000 {
+        if i % 100 == 0 {
+            println!("determinism iteration {}", i);
+        }
         app1.update(&UpdateArgs { dt: 0.02 });
         app2.update(&UpdateArgs { dt: 0.02 });
+        if app1 != app2 {
+            use std::fs::File;
+            use std::io::Write;
+            let mut f1 = File::create("dump_app1").unwrap();
+            let mut f2 = File::create("dump_app2").unwrap();
+
+            let s1 = format!("{:#?}", app1);
+            let s2 = format!("{:#?}", app2);
+
+            f1.write_all(s1.as_bytes()).unwrap();
+            f2.write_all(s2.as_bytes()).unwrap();
+        }
         assert_eq!(app1, app2);
     }
 }
 
 #[test]
 #[should_panic]
-fn float_commu() {
+fn float_assoc() {
     let mut rng = rand::thread_rng();
     let tests = 1_000;
 
@@ -297,7 +328,7 @@ fn float_commu() {
 #[test]
 #[should_panic]
 // even storing as f32 and calculating in f64 does not help
-fn float_commu_trunc() {
+fn float_assoc_trunc() {
     let mut rng = rand::thread_rng();
     let tests = 1_000;
 

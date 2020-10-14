@@ -95,7 +95,8 @@ impl<B: Brain> Blip<B> {
         ];
         let grid_slot = &foodgrid[gridpos[0]][gridpos[1]];
 
-        let mut grid_value = oldgrid[gridpos[0]][gridpos[1]];
+        let mut grid_value_r = oldgrid[gridpos[0]][gridpos[1]];
+        let grid_value = grid_value_r.to_f64();
 
         //todo: also smell distance from center of tile
         // food is ~ 0-10+, scale to -5 to 5+
@@ -115,16 +116,18 @@ impl<B: Brain> Blip<B> {
         let div = 1. + (outputs.speed() * 2.5);
         let consumption = (max * gridfactor / div).min(grid_value);
         if consumption > 0. && !consumption.is_nan() {
+            let consumption_r: fix_rat::TenRat = consumption.into();
             // retry writing the delta
             // todo: rename variables for clarity
             loop {
-                let newval = grid_value - consumption;
+                // gotta do all determinitic calculations in rationals
+                let newval = grid_value_r - consumption_r;
                 // there is no synchronization between threads, only the global food object
                 // so only the atomic operaton on it needs to be taken care of.
                 // there is no other operations to synchronize
                 // relaxed ordering should therefore be fine to my best knowledge
                 match grid_slot.compare_exchange(
-                    grid_value,
+                    grid_value_r,
                     newval,
                     Ordering::Relaxed,
                     Ordering::Relaxed,
@@ -135,7 +138,7 @@ impl<B: Brain> Blip<B> {
                     }
                     Err(v) => {
                         //println!("{:?} had to reloop for cas", gridpos);
-                        grid_value = v;
+                        grid_value_r = v;
                         continue;
                     }
                 }
@@ -317,7 +320,7 @@ impl<B: Brain> Genes<B> {
             self.clockstretch_2 * (1. + rng.gen_range(-self.mutation_rate, self.mutation_rate));
 
         use std::f64::consts::PI;
-        let mut eyes = self.eyes.clone();
+        let mut eyes = self.eyes;
         for eye in eyes.iter_mut() {
             *eye += rng.gen_range(-self.mutation_rate * PI, self.mutation_rate * PI);
             // wrap around
@@ -358,6 +361,5 @@ pub fn eye_vision(
     let diff = vecmath::sub(other, status.pos);
     let diff_norm = vecmath::norm(diff);
     let angle = vecmath::atan2(diff_norm);
-    let angle_diff = vecmath::rad_norm(angle - eye_angle);
-    angle_diff
+    vecmath::rad_norm(angle - eye_angle)
 }

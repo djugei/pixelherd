@@ -3,7 +3,7 @@ use crate::blip::scaled_rand;
 use crate::config;
 use rand::Rng;
 // eyes are 3 colours, angle, dist
-const N_INPUTS: usize = 4 + (config::b::N_EYES * 5);
+const N_INPUTS: usize = 5 + (config::b::N_EYES * 5);
 const N_OUTPUTS: usize = 6;
 
 const INNER_SIZE: usize = (N_INPUTS + N_OUTPUTS) / 2;
@@ -24,14 +24,17 @@ impl Inputs {
     pub fn smell_mut(&mut self) -> &mut f64 {
         &mut self.data[1]
     }
-    pub fn clock1_mut(&mut self) -> &mut f64 {
+    pub fn smell_dist_mut(&mut self) -> &mut f64 {
         &mut self.data[2]
     }
-    pub fn clock2_mut(&mut self) -> &mut f64 {
+    pub fn clock1_mut(&mut self) -> &mut f64 {
         &mut self.data[3]
     }
+    pub fn clock2_mut(&mut self) -> &mut f64 {
+        &mut self.data[4]
+    }
     pub fn eyes_mut(&mut self) -> [&mut [f64]; config::b::N_EYES] {
-        let data = &mut self.data[4..];
+        let data = &mut self.data[5..];
         let eyesize = 5;
         // sadly arrays and iterators don't interact well currently
         // so this is more or less hardcoded for now

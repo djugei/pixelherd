@@ -129,6 +129,7 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
         iter.for_each(|(index, (new, old))| {
             let seed = self.time.to_bits();
             let seed = seed ^ (index as u64);
+            // todo: better seeding, can seed from root rng, store rng with blip
             let mut rng = DetRng::seed_from_u64(seed);
 
             let spawn = new.update(

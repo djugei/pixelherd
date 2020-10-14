@@ -89,10 +89,9 @@ impl<B: Brain> Blip<B> {
         *inputs.clock1_mut() = (time * old.genes.clockstretch_1).sin();
         *inputs.clock2_mut() = (time * old.genes.clockstretch_2).sin();
 
-        let gridpos = [
-            (self.status.pos[0] / 10.) as usize,
-            (self.status.pos[1] / 10.) as usize,
-        ];
+        let x = self.status.pos[0] / 10.;
+        let y = self.status.pos[1] / 10.;
+        let gridpos = [x as usize, y as usize];
         let grid_slot = &foodgrid[gridpos[0]][gridpos[1]];
 
         let mut grid_value_r = oldgrid[gridpos[0]][gridpos[1]];
@@ -101,6 +100,11 @@ impl<B: Brain> Blip<B> {
         //todo: also smell distance from center of tile
         // food is ~ 0-10+, scale to -5 to 5+
         *inputs.smell_mut() = grid_value - 5.;
+
+        let xfrac = x.fract();
+        let yfrac = y.fract();
+        let centerdist = xfrac * xfrac + yfrac * yfrac;
+        *inputs.smell_dist_mut() = centerdist / 2.;
 
         // inputs are processed at this point, time to feed the brain some data
         let outputs = old.genes.brain.think(&inputs);

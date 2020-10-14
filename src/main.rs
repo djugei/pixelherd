@@ -103,7 +103,10 @@ fn main() {
                 input::Button::Keyboard(input::keyboard::Key::NumPadPlus) => {
                     if args.state == input::ButtonState::Release {
                         speed += 1;
-                        println!("now running {} 0.02 updates per update", speed);
+                        println!(
+                            "now running {} 0.02 updates per update",
+                            if hyper { 1000 } else { 1 } * speed
+                        );
                     }
                 }
                 input::Button::Keyboard(input::keyboard::Key::NumPadMinus) => {
@@ -111,7 +114,10 @@ fn main() {
                         if speed > 1 {
                             speed -= 1;
                         }
-                        println!("now running {} 0.02 updates per update", speed);
+                        println!(
+                            "now running {} 0.02 updates per update",
+                            if hyper { 1000 } else { 1 } * speed
+                        );
                     }
                 }
                 input::Button::Keyboard(input::keyboard::Key::Space) => {

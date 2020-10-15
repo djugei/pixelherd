@@ -62,34 +62,36 @@ impl Renderer {
         // ideally i would have two types, simpos and screenpos
         let sim_x = self.mousepos[0] * config::SIM_WIDTH / width;
         let sim_y = self.mousepos[1] * config::SIM_HEIGHT / height;
-        let marker = self
-            .selection
-            .select(app.blips().iter_indexed(), app.tree(), &[sim_x, sim_y]);
-        for (index, blip) in app.blips().iter_indexed() {
-            let (px, py) = (blip.status.pos[0], blip.status.pos[1]);
-            let (pdx, pdy) = (blip.status.vel[0], blip.status.vel[1]);
+        let marker = self.selection.select(
+            app.statuses().iter().enumerate(),
+            app.tree(),
+            &[sim_x, sim_y],
+        );
+        for (index, (status, genes)) in app.blips_ro().enumerate() {
+            let (px, py) = (status.pos[0], status.pos[1]);
+            let (pdx, pdy) = (status.vel[0], status.vel[1]);
             let pos_transform = c.transform.trans(
                 px / config::SIM_WIDTH * width,
                 py / config::SIM_HEIGHT * height,
             );
             let transform = pos_transform.orient(pdx, pdy).rot_deg(90.);
             if Some(index) == marker {
-                polygon(blip.status.rgb, TRI, transform.zoom(2.), gl);
+                polygon(status.rgb, TRI, transform.zoom(2.), gl);
                 let tree = app.tree();
                 let search = tree
-                    .query_distance(&blip.status.pos, config::b::LOCAL_ENV)
+                    .query_distance(&status.pos, config::b::LOCAL_ENV)
                     .collect::<Vec<_>>();
 
                 const RECT: [f64; 4] = [-5., -5., 10., 10.];
                 use std::f64::consts::PI;
                 let col = [RED, GREEN, BLUE];
 
-                let base_angle = blip::base_angle(&blip.status);
-                for (eye, col) in blip.genes.eyes.iter().zip(col.iter()) {
+                let base_angle = blip::base_angle(&status);
+                for (eye, col) in genes.eyes.iter().zip(col.iter()) {
                     let eye_angle = blip::eye_angle(base_angle, *eye);
                     let visual_fov = 0.2 * PI;
                     let eyesearch = search.iter().filter(|(_d, (p, _index))| {
-                        blip::eye_vision(&blip.status, eye_angle, *p).abs() < visual_fov
+                        blip::eye_vision(&status, eye_angle, *p).abs() < visual_fov
                     });
 
                     for (_d, (p, _index)) in eyesearch {
@@ -102,7 +104,7 @@ impl Renderer {
                     }
                 }
 
-                for (eye, col) in blip.genes.eyes.iter().zip(col.iter()) {
+                for (eye, col) in genes.eyes.iter().zip(col.iter()) {
                     let (s, c) = eye.sin_cos();
                     line_from_to(
                         *col,
@@ -115,25 +117,25 @@ impl Renderer {
                 }
                 let display = format!(
                     "children: {}\nhp: {:.2}\ngeneration: {}\nage: {:.2}\nheading: {:.2}\nspeed: {:.2?}",
-                    blip.status.children,
-                    blip.status.hp,
-                    blip.status.generation,
-                    blip.status.age,
+                    status.children,
+                    status.hp,
+                    status.generation,
+                    status.age,
                     base_angle,
-                    vecmath::len(blip.status.vel),
+                    vecmath::len(status.vel),
                 );
                 let size = 20_usize;
                 display_text(&display, glyph_cache, pos_transform, BLACK, size, gl).unwrap();
             } else {
-                polygon(blip.status.rgb, TRI, transform, gl);
+                polygon(status.rgb, TRI, transform, gl);
             }
-            if blip.status.spike > 0.3 {
+            if status.spike > 0.3 {
                 let start = -20. * (2. / 3.);
                 line_from_to(
                     RED,
                     1.2,
                     [0., start],
-                    [0., start - (blip.status.spike * 10.)],
+                    [0., start - (status.spike * 10.)],
                     transform,
                     gl,
                 );

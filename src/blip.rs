@@ -11,33 +11,29 @@ use crate::app::TreeRef;
 use crate::vecmath;
 use crate::vecmath::Vector;
 
-use crate::stablevec::StableVec;
-
 use atomic::Ordering;
 
-#[derive(Clone, Copy, PartialEq, Debug)]
-// todo: as only status changes (and is kinda small) and genes do not change (and are kinad big
-// cause of the brain) it might be smart to separate them, so the genes do not need to be copied on
-// every execution
-pub struct Blip<B: Brain + Clone> {
+#[derive(PartialEq, Debug)]
+pub struct Blip<'s, 'g, B: Brain> {
     /// things that change during the lifetime of a blip
-    pub status: Status,
+    pub status: &'s mut Status,
     /// things that only change trough mutation during reproduction
-    pub genes: Genes<B>,
+    pub genes: &'g Genes<B>,
 }
 
-impl<B: Brain> Blip<B> {
+impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
     pub fn update<R: Rng>(
         &mut self,
         mut rng: R,
-        old: &Self,
-        olds: &StableVec<Self>,
+        old: &Status,
+        olds: &[Status],
         tree: TreeRef,
         oldgrid: &OldFoodGrid,
         foodgrid: &FoodGrid,
         time: f64,
         dt: f64,
-    ) -> Option<Self> {
+    ) -> Option<(Status, Genes<B>)> {
+        // todo: split into input gathering, thinking and etc
         let mut inputs: brains::Inputs = Default::default();
 
         let search = tree.query_distance(&self.status.pos, config::b::LOCAL_ENV);
@@ -54,14 +50,13 @@ impl<B: Brain> Blip<B> {
             let nb = &olds.get(*index).unwrap();
 
             // todo: get rid of sqrt
-            let nb_sound = (nb.status.vel[0] * nb.status.vel[0])
-                + (nb.status.vel[1] * nb.status.vel[1]).sqrt();
+            let nb_sound = (nb.vel[0] * nb.vel[0]) + (nb.vel[1] * nb.vel[1]).sqrt();
 
             *inputs.sound_mut() += nb_sound / dist_squared;
 
             for (i, eye) in eye_angles.iter().enumerate() {
                 let fov = 0.2 * std::f64::consts::PI;
-                let angle = eye_vision(&self.status, *eye, nb.status.pos);
+                let angle = eye_vision(&self.status, *eye, nb.pos);
                 // see the closest one in fov
                 if angle.abs() < fov && eyedists[i].0 > dist_squared {
                     eyedists[i] = (dist_squared, angle, *index);
@@ -70,7 +65,7 @@ impl<B: Brain> Blip<B> {
             for (&(dis, angle, id), inp) in eyedists.iter().zip(inputs.eyes_mut().iter_mut()) {
                 if dis != f64::INFINITY {
                     let nb = &olds.get(id).unwrap();
-                    let rgb = nb.status.rgb;
+                    let rgb = nb.rgb;
                     let write = [
                         rgb[0] as f64 - 0.5,
                         rgb[1] as f64 - 0.5,
@@ -86,8 +81,8 @@ impl<B: Brain> Blip<B> {
         }
 
         // rust apparently does the modulo [-pi/2, pi/2] internally
-        *inputs.clock1_mut() = (time * old.genes.clockstretch_1).sin();
-        *inputs.clock2_mut() = (time * old.genes.clockstretch_2).sin();
+        *inputs.clock1_mut() = (time * self.genes.clockstretch_1).sin();
+        *inputs.clock2_mut() = (time * self.genes.clockstretch_2).sin();
 
         let x = self.status.pos[0] / 10.;
         let y = self.status.pos[1] / 10.;
@@ -107,7 +102,7 @@ impl<B: Brain> Blip<B> {
         *inputs.smell_dist_mut() = centerdist / 2.;
 
         // inputs are processed at this point, time to feed the brain some data
-        let outputs = old.genes.brain.think(&inputs);
+        let outputs = self.genes.brain.think(&inputs);
 
         // eat food
         //todo: put into config
@@ -168,11 +163,11 @@ impl<B: Brain> Blip<B> {
         // change direction
         let steer = [0., outputs.steering()];
         // fixme: handle 0 speed
-        let dir = vecmath::norm(old.status.vel);
+        let dir = vecmath::norm(old.vel);
 
         let push = vecmath::rotate(steer, dir);
 
-        let mut vel = vecmath::add(old.status.vel, push);
+        let mut vel = vecmath::add(old.vel, push);
         // todo: be smarter about scaling speed, maybe do some log-stuff to simulate drag
         vel = vecmath::norm(vel);
         vel = vecmath::scale(vel, outputs.speed());
@@ -193,7 +188,7 @@ impl<B: Brain> Blip<B> {
         // which is kinda bad for multithreading.
         // its a rather rare event though so its special-cased
 
-        let ret = if self.status.hp > old.genes.repr_tres {
+        let ret = if self.status.hp > self.genes.repr_tres {
             let spawn = self.split(&mut rng);
             Some(spawn)
         } else {
@@ -226,14 +221,14 @@ impl<B: Brain> Blip<B> {
             pos[1] += config::SIM_WIDTH
         };
     }
-    pub fn new<R: Rng>(mut rng: R) -> Self {
+    pub fn new<R: Rng>(mut rng: R) -> (Status, Genes<B>) {
         let x = rng.gen_range(0., config::SIM_WIDTH);
         let y = rng.gen_range(0., config::SIM_HEIGHT);
 
         let dx = rng.gen_range(-30., 30.);
         let dy = rng.gen_range(-5., 5.);
-        Self {
-            status: Status {
+        (
+            Status {
                 pos: [x, y],
                 vel: [dx, dy],
                 spike: 0.,
@@ -244,22 +239,25 @@ impl<B: Brain> Blip<B> {
                 generation: 0,
                 rgb: [0.; 4],
             },
-            genes: Genes::new(&mut rng),
-        }
+            Genes::new(&mut rng),
+        )
     }
-    pub fn split<R: Rng>(&mut self, mut rng: R) -> Self {
+    pub fn from_components(status: &'s mut Status, genes: &'g Genes<B>) -> Self {
+        Self { status, genes }
+    }
+    pub fn split<R: Rng>(&mut self, mut rng: R) -> (Status, Genes<B>) {
         self.status.hp /= 2.;
         self.status.children += 1;
-        let mut new = self.clone();
-        new.status.generation += 1;
-        new.status.food = 0.;
-        new.status.age = 0.;
-        new.status.children = 0;
-        new.status.vel[0] += 1.;
-        new.status.vel[1] += 1.;
+        let mut new_status = *self.status;
+        let new_genes = self.genes.mutate(&mut rng);
+        new_status.generation += 1;
+        new_status.food = 0.;
+        new_status.age = 0.;
+        new_status.children = 0;
+        new_status.vel[0] += 1.;
+        new_status.vel[1] += 1.;
 
-        new.genes.mutate(&mut rng);
-        new
+        (new_status, new_genes)
     }
 }
 

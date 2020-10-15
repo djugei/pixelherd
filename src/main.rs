@@ -3,6 +3,8 @@
 // 7. add state, both for pausing/resuming simulation and for extracting successful specimen
 // 8. add carnivores, currently the simulation is undergoing boom- and bust-cycles, predators fix
 //    that a bit
+// 10. make sure distance calculations correctly work with the wraparound world (hint: rn they
+//     don't)
 
 use opengl_graphics::{GlGraphics, OpenGL};
 use sdl2_window::Sdl2Window as Window;
@@ -23,7 +25,6 @@ mod vecmath;
 mod brains;
 
 mod blip;
-use blip::Blip;
 
 mod select;
 use select::Selection;
@@ -62,7 +63,7 @@ fn main() {
         .build()
         .unwrap();
 
-    let mut app = App::<brains::ArcBrain<brains::SimpleBrain>>::new(1234);
+    let mut app = App::<brains::SimpleBrain>::new(1234);
     let mut render = Renderer {
         gl: GlGraphics::new(opengl),
         mousepos: [0.; 2],
@@ -212,11 +213,9 @@ fn test_atomic() {
 fn bench_brains() {
     // this is a poor mans benchmark because i didn't want to set up criterion for literally one
     // testcase and the std bench feature is nightly
-    let times = 10_000;
+    let times = 100_000;
     use std::time::Instant;
 
-    use crate::brains::ArcBrain;
-    use crate::brains::BoxBrain;
     use crate::brains::SimpleBrain;
 
     let mut app1 = App::<SimpleBrain>::new(1234);
@@ -224,23 +223,15 @@ fn bench_brains() {
     for _ in 0..times {
         app1.update(&UpdateArgs { dt: 0.02 });
     }
-    let app1 = before.elapsed().as_millis();
+    let app1_t = before.elapsed().as_millis();
 
-    let mut app2 = App::<BoxBrain<SimpleBrain>>::new(1234);
+    let mut app2 = App::<Box<SimpleBrain>>::new(1234);
     let before = Instant::now();
     for _ in 0..times {
         app2.update(&UpdateArgs { dt: 0.02 });
     }
-    let app2 = before.elapsed().as_millis();
+    let app2_t = before.elapsed().as_millis();
 
-    let mut app3 = App::<ArcBrain<SimpleBrain>>::new(1234);
-    let before = Instant::now();
-    for _ in 0..times {
-        app3.update(&UpdateArgs { dt: 0.02 });
-    }
-    let app3 = before.elapsed().as_millis();
-
-    println!("app1: {}mili", app1);
-    println!("app2: {}mili", app2);
-    println!("app3: {}mili", app3);
+    println!("app1: {}mili", app1_t);
+    println!("app2: {}mili", app2_t);
 }

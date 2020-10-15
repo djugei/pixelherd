@@ -1,6 +1,5 @@
 use crate::app::TreeRef;
-use crate::brains::Brain;
-use crate::Blip;
+use crate::blip::Status;
 
 #[derive(Clone, Copy, Debug)]
 pub enum Selection {
@@ -32,35 +31,31 @@ impl Selection {
     }
 
     /// mousepos needs to be scaled to simulation coordinates already
-    pub fn select<'a, I, B: 'a + Brain>(
-        self,
-        blips: I,
-        tree: TreeRef,
-        mousepos: &[f64; 2],
-    ) -> Option<usize>
+    pub fn select<'a, I>(self, blips: I, tree: TreeRef, mousepos: &[f64; 2]) -> Option<usize>
     where
-        I: Iterator<Item = (usize, &'a Blip<B>)>,
+        I: Iterator<Item = (usize, &'a Status)>,
     {
+        // i think this is where ppl use lenses?
         match self {
             Selection::None => None,
             Selection::Bigboy => blips
-                .map(|(i, b)| (i, b.status.hp + b.status.food))
+                .map(|(i, b)| (i, b.hp + b.food))
                 .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
                 .map(|c| c.0),
             Selection::Age => blips
-                .map(|(i, b)| (i, b.status.age))
+                .map(|(i, b)| (i, b.age))
                 .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
                 .map(|c| c.0),
             Selection::Young => blips
-                .map(|(i, b)| (i, b.status.age))
+                .map(|(i, b)| (i, b.age))
                 .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
                 .map(|c| c.0),
             Selection::Spawns => blips
-                .map(|(i, b)| (i, b.status.children))
+                .map(|(i, b)| (i, b.children))
                 .max_by(|a, b| a.1.cmp(&b.1))
                 .map(|c| c.0),
             Selection::Generation => blips
-                .map(|(i, b)| (i, b.status.generation))
+                .map(|(i, b)| (i, b.generation))
                 .max_by(|a, b| a.1.cmp(&b.1))
                 .map(|c| c.0),
             Selection::Mouse => {

@@ -1,8 +1,7 @@
 use crate::config;
 
-use crate::blip::Blip;
+use crate::blip::{Blip, Genes, Status};
 use crate::brains::Brain;
-use crate::stablevec::StableVec;
 use anti_r::vec::SpatVec;
 use anti_r::SpatSlice;
 use atomic::Atomic;
@@ -31,7 +30,8 @@ pub type OldFoodGrid = [[TenRat; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
 
 #[derive(Debug)]
 pub struct App<B: Brain + Send + Clone + Sync> {
-    blips: StableVec<Blip<B>>,
+    genes: Vec<Genes<B>>,
+    status: Vec<Status>,
     foodgrid: FoodGrid,
     // todo: replace with a simple sorted list
     tree: Tree,
@@ -46,8 +46,11 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
     pub fn tree(&self) -> TreeRef<'_> {
         (&self.tree).into()
     }
-    pub fn blips(&self) -> &StableVec<Blip<B>> {
-        &self.blips
+    pub fn blips_ro(&self) -> impl Iterator<Item = (&Status, &Genes<B>)> {
+        self.status.iter().zip(&self.genes)
+    }
+    pub fn statuses(&self) -> &[Status] {
+        &self.status
     }
     pub fn new(seed: u64) -> Self {
         let rng = DetRng::seed_from_u64(seed);
@@ -66,7 +69,8 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
 
         // Create a new game and run it.
         let mut app = App {
-            blips: StableVec::with_capacity(config::INITIAL_CELLS),
+            status: Vec::with_capacity(config::INITIAL_CELLS),
+            genes: Vec::with_capacity(config::INITIAL_CELLS),
             tree: SpatVec::new_from(Vec::with_capacity(config::INITIAL_CELLS)),
             foodgrid,
             time: 0.,
@@ -74,7 +78,9 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
         };
 
         for _ in 0..config::INITIAL_CELLS {
-            app.blips.push(Blip::new(&mut app.rng));
+            let (s, g) = Blip::new(&mut app.rng);
+            app.status.push(s);
+            app.genes.push(g);
         }
 
         for w in 0..config::FOOD_WIDTH {
@@ -92,25 +98,16 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
         self.time += args.dt;
         // update the inputs
         // todo: don't clone here, keep two buffers and swap instead
-        let mut new = self.blips.clone();
+        let mut new = self.status.clone();
 
         let spawns = std::sync::Mutex::new(Vec::new());
 
         let iter = new
-            .inner_mut()
             .par_iter_mut()
-            .zip(self.blips.inner())
+            .zip(&self.status)
+            .zip(&self.genes)
             .enumerate()
-            //todo: maybe move this into the for_each
-            // as the blips are assumed to be quite dense
-            // (better chunking for parallel execution)
-            .flat_map(|(index, (new, old))| {
-                if let (Some(new), Some(old)) = (new, old) {
-                    Some((index, (new, old)))
-                } else {
-                    None
-                }
-            });
+            .map(|(index, ((new, old), genes))| (index, old, Blip::from_components(new, genes)));
 
         let mut oldgrid: OldFoodGrid = [[TenRat::from(0); config::FOOD_HEIGHT]; config::FOOD_WIDTH];
         for (w, r) in oldgrid.iter_mut().zip(self.foodgrid.iter_mut()) {
@@ -126,7 +123,7 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
 
         // new is write only. if you need data from the last iteration
         // get it from old only.
-        iter.for_each(|(index, (new, old))| {
+        iter.for_each(|(index, old, mut new)| {
             let seed = self.time.to_bits();
             let seed = seed ^ (index as u64);
             // todo: better seeding, can seed from root rng, store rng with blip
@@ -135,7 +132,7 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
             let spawn = new.update(
                 &mut rng,
                 old,
-                &self.blips,
+                &self.status,
                 self.tree(),
                 &oldgrid,
                 &self.foodgrid,
@@ -152,20 +149,38 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
         // gotta sort so insertion order is deterministic
         spawns.sort_unstable_by_key(|(i, _)| *i);
 
-        new.extend(spawns.into_iter().map(|(_i, e)| e));
+        for (_i, (s, g)) in spawns {
+            // oh fuck the indices gotta really make sure i don't fuck this up
+            new.push(s);
+            self.genes.push(g);
+        }
 
-        // todo: drop some meat on death
-        new.retain(|blip| blip.status.hp > 0.);
+        let deaths = new
+            .iter()
+            .enumerate()
+            .filter(|(_i, s)| s.hp <= 0.)
+            .map(|(i, _)| i)
+            .rev()
+            .collect::<Vec<_>>();
+
+        for i in deaths {
+            // todo: drop some meat on death
+            new.remove(i);
+            self.genes.remove(i);
+        }
 
         if new.len() < config::REPLACEMENT {
             println!("force-spawned");
-            new.push(Blip::new(&mut self.rng));
+            let (s, g) = Blip::new(&mut self.rng);
+            new.push(s);
+            self.genes.push(g);
         }
 
-        self.blips = new;
+        self.status = new;
 
         // chance could be > 1 if dt or replenish are big enough
         let mut chance = (config::REPLENISH * args.dt) / 4.;
+        // fixme: this overruns the rational (generally when food is dropped 2x on the same field)
         while chance > 0. {
             if self.rng.gen_bool(chance.min(1.)) {
                 let w: usize = self.rng.gen_range(0, config::FOOD_WIDTH);
@@ -180,60 +195,61 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
         }
 
         // move blips
-        let iter = self.blips.inner_mut().par_iter_mut();
-        //let iter = self.blips.inner_mut().iter_mut();
-        iter.flatten().for_each(|blip| blip.motion(args.dt));
+        let iter = self
+            .status
+            .par_iter_mut()
+            .zip(&self.genes)
+            .map(|(s, g)| Blip::from_components(s, g));
+        iter.for_each(|mut blip| blip.motion(args.dt));
 
         // update tree
         // todo: instead of re-building on each iteration i should update it
         // the blips have stable indices specifically for this usecase
         let tree = self
-            .blips
-            .iter_indexed()
-            .inspect(|(_, b)| {
-                assert!(!b.status.pos[0].is_nan());
-                assert!(!b.status.pos[1].is_nan())
+            .status
+            .iter()
+            .enumerate()
+            .inspect(|(_, s)| {
+                assert!(!s.pos[0].is_nan());
+                assert!(!s.pos[1].is_nan())
             })
-            .map(|(index, b)| (b.status.pos, index))
+            .map(|(index, s)| (s.pos, index))
             .collect();
         self.tree = SpatVec::new_from(tree);
     }
     pub fn report(&self) {
         use crate::select::Selection;
-        let num = self.blips.len();
+        let num = self.genes.len();
         if num == 0 {
             println!("no blips at all");
         } else {
             // todo: express this nicer once .collect into arrays is available
             let age = self
-                .blips
+                .status
                 .get(
                     Selection::Age
-                        .select(self.blips.iter_indexed(), self.tree(), &[0., 0.])
+                        .select(self.status.iter().enumerate(), self.tree(), &[0., 0.])
                         .unwrap(),
                 )
                 .unwrap()
-                .status
                 .age;
             let generation = self
-                .blips
+                .status
                 .get(
                     Selection::Generation
-                        .select(self.blips.iter_indexed(), self.tree(), &[0., 0.])
+                        .select(self.status.iter().enumerate(), self.tree(), &[0., 0.])
                         .unwrap(),
                 )
                 .unwrap()
-                .status
                 .generation;
             let spawns = self
-                .blips
+                .status
                 .get(
                     Selection::Spawns
-                        .select(self.blips.iter_indexed(), self.tree(), &[0., 0.])
+                        .select(self.status.iter().enumerate(), self.tree(), &[0., 0.])
                         .unwrap(),
                 )
                 .unwrap()
-                .status
                 .children;
 
             let food: f64 = self
@@ -261,7 +277,10 @@ where
     B: Brain + Send + Copy + Sync + PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
-        let base = self.blips == other.blips && self.tree == other.tree && self.time == other.time;
+        let base = self.status == other.status
+            && self.genes == other.genes
+            && self.tree == other.tree
+            && self.time == other.time;
         if !base {
             return base;
         };

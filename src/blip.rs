@@ -305,6 +305,8 @@ impl<B: Brain> Genes<B> {
         }
     }
 
+    // lol, ok figured out why evolution was not happening
+    #[must_use]
     fn mutate<R: Rng>(&self, mut rng: R) -> Self {
         //let mut new = self.clone();
         let mut brain = self.brain.clone();

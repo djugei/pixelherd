@@ -213,9 +213,10 @@ fn test_atomic() {
 fn bench_brains() {
     // this is a poor mans benchmark because i didn't want to set up criterion for literally one
     // testcase and the std bench feature is nightly
-    let times = 100_000;
+    let times = 50_000;
     use std::time::Instant;
 
+    use crate::brains::BigBrain;
     use crate::brains::SimpleBrain;
 
     let mut app1 = App::<SimpleBrain>::new(1234);
@@ -232,6 +233,23 @@ fn bench_brains() {
     }
     let app2_t = before.elapsed().as_millis();
 
+    let mut app3 = App::<BigBrain>::new(1234);
+    let before = Instant::now();
+    for _ in 0..times {
+        app3.update(&UpdateArgs { dt: 0.02 });
+    }
+    let app3_t = before.elapsed().as_millis();
+
+    let mut app4 = App::<Box<BigBrain>>::new(1234);
+    let before = Instant::now();
+    for _ in 0..times {
+        app4.update(&UpdateArgs { dt: 0.02 });
+    }
+    let app4_t = before.elapsed().as_millis();
+
     println!("app1: {}mili", app1_t);
     println!("app2: {}mili", app2_t);
+
+    println!("app1: {}mili", app3_t);
+    println!("app2: {}mili", app4_t);
 }

@@ -63,7 +63,7 @@ fn main() {
         .build()
         .unwrap();
 
-    let mut app = App::<brains::SimpleBrain>::new(1234);
+    let mut app = App::<brains::SimpleBrain>::new(1234, "report".into());
     let mut render = Renderer {
         gl: GlGraphics::new(opengl),
         mousepos: [0.; 2],
@@ -244,28 +244,28 @@ fn bench_brains() {
     use crate::brains::BigBrain;
     use crate::brains::SimpleBrain;
 
-    let mut app1 = App::<SimpleBrain>::new(1234);
+    let mut app1 = App::<SimpleBrain>::new(1234, None);
     let before = Instant::now();
     for _ in 0..times {
         app1.update(&UpdateArgs { dt: 0.02 });
     }
     let app1_t = before.elapsed().as_millis();
 
-    let mut app2 = App::<Box<SimpleBrain>>::new(1234);
+    let mut app2 = App::<Box<SimpleBrain>>::new(1234, None);
     let before = Instant::now();
     for _ in 0..times {
         app2.update(&UpdateArgs { dt: 0.02 });
     }
     let app2_t = before.elapsed().as_millis();
 
-    let mut app3 = App::<BigBrain>::new(1234);
+    let mut app3 = App::<BigBrain>::new(1234, None);
     let before = Instant::now();
     for _ in 0..times {
         app3.update(&UpdateArgs { dt: 0.02 });
     }
     let app3_t = before.elapsed().as_millis();
 
-    let mut app4 = App::<Box<BigBrain>>::new(1234);
+    let mut app4 = App::<Box<BigBrain>>::new(1234, None);
     let before = Instant::now();
     for _ in 0..times {
         app4.update(&UpdateArgs { dt: 0.02 });

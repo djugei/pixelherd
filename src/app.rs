@@ -2,6 +2,7 @@ use crate::config;
 
 use crate::blip::{Blip, Genes, Status};
 use crate::brains::Brain;
+use crate::select::Selection;
 use anti_r::vec::SpatVec;
 use anti_r::SpatSlice;
 use atomic::Atomic;
@@ -37,6 +38,8 @@ pub struct App<B: Brain + Send + Clone + Sync> {
     tree: Tree,
     time: f64,
     rng: DetRng,
+    last_report: f64,
+    report_file: Option<std::fs::File>,
 }
 
 impl<B: Brain + Send + Clone + Sync> App<B> {
@@ -52,7 +55,7 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
     pub fn statuses(&self) -> &[Status] {
         &self.status
     }
-    pub fn new(seed: u64) -> Self {
+    pub fn new(seed: u64, report_path: Option<&str>) -> Self {
         let rng = DetRng::seed_from_u64(seed);
         let foodgrid: OldFoodGrid =
             [[TenRat::from_int(0); config::FOOD_HEIGHT]; config::FOOD_WIDTH];
@@ -67,14 +70,17 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
         // "as-casting" the pointer
         let foodgrid = unsafe { std::mem::transmute(foodgrid) };
 
-        // Create a new game and run it.
+        let report_file = report_path.map(std::fs::File::create).map(Result::unwrap);
+        // Create a new simulation and run it.
         let mut app = App {
             status: Vec::with_capacity(config::INITIAL_CELLS),
             genes: Vec::with_capacity(config::INITIAL_CELLS),
             tree: SpatVec::new_from(Vec::with_capacity(config::INITIAL_CELLS)),
             foodgrid,
             time: 0.,
+            last_report: 0.,
             rng,
+            report_file,
         };
 
         for _ in 0..config::INITIAL_CELLS {
@@ -180,7 +186,6 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
 
         // chance could be > 1 if dt or replenish are big enough
         let mut chance = (config::REPLENISH * args.dt) / 4.;
-        // fixme: this overruns the rational (generally when food is dropped 2x on the same field)
         while chance > 0. {
             if self.rng.gen_bool(chance.min(1.)) {
                 let w: usize = self.rng.gen_range(0, config::FOOD_WIDTH);
@@ -189,7 +194,7 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
                 // expected: 4, chances is divided by 4
                 // trying to get a less uniform food distribution
                 let f: TenRat = self.rng.gen_range(3., 5.).into();
-                *grid = *grid + f;
+                *grid = grid.saturating_add(f);
             }
             chance -= 1.;
         }
@@ -216,41 +221,69 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
             .map(|(index, s)| (s.pos, index))
             .collect();
         self.tree = SpatVec::new_from(tree);
+
+        // just to make sure ppl with old rust versions can't run this, fuck debian in particular
+        if self.time - self.last_report > std::f64::consts::TAU * 100. {
+            self.write_report();
+            self.last_report = self.time;
+            // write to stdout more rarely
+            if self.time as u64 % ((std::f64::consts::TAU * 1000.) as u64) == 0 {
+                self.report()
+            }
+        }
     }
+    fn select_age(&self) -> f64 {
+        self.status
+            .get(
+                Selection::Age
+                    .select(self.status.iter().enumerate(), self.tree(), &[0., 0.])
+                    .unwrap(),
+            )
+            .unwrap()
+            .age
+    }
+    fn select_generation(&self) -> usize {
+        self.status
+            .get(
+                Selection::Generation
+                    .select(self.status.iter().enumerate(), self.tree(), &[0., 0.])
+                    .unwrap(),
+            )
+            .unwrap()
+            .generation
+    }
+    fn select_children(&self) -> usize {
+        self.status
+            .get(
+                Selection::Spawns
+                    .select(self.status.iter().enumerate(), self.tree(), &[0., 0.])
+                    .unwrap(),
+            )
+            .unwrap()
+            .children
+    }
+    fn select_lineage(&self) -> f64 {
+        self.status
+            .get(
+                Selection::Lineage
+                    .select(self.status.iter().enumerate(), self.tree(), &[0., 0.])
+                    .unwrap(),
+            )
+            .unwrap()
+            .lineage
+    }
+    // takes &mut for the file write, kinda pointless since files are global state anyway
     pub fn report(&self) {
-        use crate::select::Selection;
         let num = self.genes.len();
         if num == 0 {
             println!("no blips at all");
         } else {
             // todo: express this nicer once .collect into arrays is available
-            let age = self
-                .status
-                .get(
-                    Selection::Age
-                        .select(self.status.iter().enumerate(), self.tree(), &[0., 0.])
-                        .unwrap(),
-                )
-                .unwrap()
-                .age;
-            let generation = self
-                .status
-                .get(
-                    Selection::Generation
-                        .select(self.status.iter().enumerate(), self.tree(), &[0., 0.])
-                        .unwrap(),
-                )
-                .unwrap()
-                .generation;
-            let spawns = self
-                .status
-                .get(
-                    Selection::Spawns
-                        .select(self.status.iter().enumerate(), self.tree(), &[0., 0.])
-                        .unwrap(),
-                )
-                .unwrap()
-                .children;
+            // or just do a full report of all selections - mouse
+            let age = self.select_age();
+            let generation = self.select_generation();
+            let spawns = self.select_children();
+            let lineage = self.select_lineage();
 
             let food: f64 = self
                 .foodgrid
@@ -263,13 +296,43 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
 
             let avg_food = food / fields;
 
+            println!("report for         : {}", self.time);
             println!("number of blips    : {}", num);
             println!("oldest             : {}", age);
             println!("highest generation : {}", generation);
             println!("most reproduction  : {}", spawns);
+            println!("longest lineage    : {}", lineage);
             println!("total food         : {}", food);
             println!("average food       : {}", avg_food);
+            println!();
         }
+    }
+
+    pub fn write_report(&mut self) {
+        let num = self.genes.len();
+        let age = self.select_age();
+        let generation = self.select_generation();
+        let spawns = self.select_children();
+        let lineage = self.select_lineage();
+        let time = self.time;
+
+        let food: f64 = self
+            .foodgrid
+            .iter_mut()
+            .flat_map(|a| a.iter_mut())
+            .map(|c| c.get_mut().to_f64())
+            .sum();
+
+        let fields = (config::FOOD_HEIGHT * config::FOOD_WIDTH) as f64;
+
+        let avg_food = food / fields;
+        self.report_file.as_mut().map(|f| {
+            let reportline = format!(
+                "{}, {}, {}, {}, {}, {}, {}, {}\n",
+                time, num, age, generation, spawns, lineage, food, avg_food
+            );
+            std::io::Write::write_all(f, reportline.as_bytes()).unwrap();
+        });
     }
 }
 impl<B> PartialEq for App<B>
@@ -299,10 +362,10 @@ where
 #[test]
 fn determinism() {
     use crate::brains::SimpleBrain;
-    let mut app1 = App::<SimpleBrain>::new(1234);
-    let mut app2 = App::<SimpleBrain>::new(1234);
+    let mut app1 = App::<SimpleBrain>::new(1234, None);
+    let mut app2 = App::<SimpleBrain>::new(1234, None);
 
-    for i in 0..100_000 {
+    for i in 0..20_000 {
         if i % 100 == 0 {
             println!("determinism iteration {}", i);
         }

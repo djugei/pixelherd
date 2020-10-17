@@ -10,6 +10,7 @@ pub enum Selection {
     Spawns,
     Generation,
     Mouse,
+    Lineage,
 }
 
 impl Selection {
@@ -26,7 +27,8 @@ impl Selection {
             Selection::Young => Selection::Spawns,
             Selection::Spawns => Selection::Generation,
             Selection::Generation => Selection::Mouse,
-            Selection::Mouse => Selection::None,
+            Selection::Mouse => Selection::Lineage,
+            Selection::Lineage => Selection::None,
         }
     }
 
@@ -65,6 +67,10 @@ impl Selection {
                     .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
                     .map(|(_d, (_p, i))| *i)
             }
+            Selection::Lineage => blips
+                .map(|(i, b)| (i, b.lineage))
+                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+                .map(|c| c.0),
         }
     }
 }

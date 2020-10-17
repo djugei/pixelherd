@@ -238,6 +238,7 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
                 children: 0,
                 generation: 0,
                 rgb: [0.; 4],
+                lineage: 0.,
             },
             Genes::new(&mut rng),
         )
@@ -254,6 +255,8 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
         new_status.food = 0.;
         new_status.age = 0.;
         new_status.children = 0;
+        new_status.lineage += self.status.age;
+        // push child away a bit
         new_status.vel[0] += 1.;
         new_status.vel[1] += 1.;
 
@@ -268,10 +271,14 @@ pub struct Status {
     pub spike: f64,
     pub food: f64,
     pub hp: f64,
+    // instead of age store birth time maybe
     pub age: f64,
     pub children: usize,
     pub generation: usize,
     pub rgb: [f32; 4],
+    // the total age of ancestors until my birth
+    // this is kindof more of a gene cause it never changes
+    pub lineage: f64,
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]

@@ -35,6 +35,7 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
     ) -> Option<(Status, Genes<B>)> {
         // todo: split into input gathering, thinking and etc
         let mut inputs: brains::Inputs = Default::default();
+        *inputs.memory_mut() = self.status.memory;
 
         let search = tree.query_distance(&self.status.pos, config::b::LOCAL_ENV);
 
@@ -144,6 +145,14 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
             }
         }
 
+        self.status
+            .memory
+            .iter_mut()
+            .zip(outputs.memory())
+            // slowly change memory to output
+            // todo: maybe do this different for each memory field (short/long memory)
+            .for_each(|(m, nm)| *m = (*m * (1. - dt)) + (nm * dt));
+
         // can only digest 2 out of the 10 theoretical max consumption food
         let digest = self.status.food.min(2. * dt);
         self.status.food -= digest;
@@ -238,6 +247,7 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
                 children: 0,
                 generation: 0,
                 rgb: [0.; 4],
+                memory: [0.; 3],
                 lineage: 0.,
             },
             Genes::new(&mut rng),
@@ -276,6 +286,7 @@ pub struct Status {
     pub children: usize,
     pub generation: usize,
     pub rgb: [f32; 4],
+    pub memory: [f64; 3],
     // the total age of ancestors until my birth
     // this is kindof more of a gene cause it never changes
     pub lineage: f64,

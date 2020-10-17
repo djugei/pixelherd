@@ -116,13 +116,14 @@ impl Renderer {
                     );
                 }
                 let display = format!(
-                    "children: {}\nhp: {:.2}\ngeneration: {}\nage: {:.2}\nheading: {:.2}\nspeed: {:.2?}",
+                    "children: {}\nhp: {:.2}\ngeneration: {}\nage: {:.2}\nheading: {:.2}\nspeed: {:.2?}\nmemory: {:.4?}",
                     status.children,
                     status.hp,
                     status.generation,
                     status.age,
                     base_angle,
                     vecmath::len(status.vel),
+                    status.memory,
                 );
                 let size = 20_usize;
                 display_text(&display, glyph_cache, pos_transform, BLACK, size, gl).unwrap();

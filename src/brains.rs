@@ -2,9 +2,11 @@
 use crate::blip::scaled_rand;
 use crate::config;
 use rand::Rng;
+use std::convert::TryInto;
+// 3 memory cells
 // eyes are 3 colours, angle, dist
-const N_INPUTS: usize = 5 + (config::b::N_EYES * 5);
-const N_OUTPUTS: usize = 6;
+const N_INPUTS: usize = 5 + 3 + (config::b::N_EYES * 5);
+const N_OUTPUTS: usize = 6 + 3;
 
 const INNER_SIZE: usize = (N_INPUTS + N_OUTPUTS) / 2;
 
@@ -33,8 +35,12 @@ impl Inputs {
     pub fn clock2_mut(&mut self) -> &mut f64 {
         &mut self.data[4]
     }
+    pub fn memory_mut(&mut self) -> &mut [f64; 3] {
+        use std::convert::TryInto;
+        (&mut self.data[5..(5 + 3)]).try_into().unwrap()
+    }
     pub fn eyes_mut(&mut self) -> [&mut [f64]; config::b::N_EYES] {
-        let data = &mut self.data[5..];
+        let data = &mut self.data[(5 + 3)..];
         let eyesize = 5;
         // sadly arrays and iterators don't interact well currently
         // so this is more or less hardcoded for now
@@ -79,7 +85,6 @@ impl Outputs {
     }
     // these are [-0.5, 0.5]
     pub fn rgb_raw(&self) -> &[f64; 3] {
-        use std::convert::TryInto;
         self.data[3..=5].try_into().unwrap()
     }
     pub fn r(&self) -> f64 {
@@ -90,6 +95,9 @@ impl Outputs {
     }
     pub fn g(&self) -> f64 {
         self.data[5] + 0.5
+    }
+    pub fn memory(&self) -> &[f64; 3] {
+        self.data[6..(6 + 3)].try_into().unwrap()
     }
 }
 #[test]

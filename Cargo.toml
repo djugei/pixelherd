@@ -13,6 +13,7 @@ piston2d-graphics = { version = "*", features = ["glyph_cache_rusttype"] }
 pistoncore-sdl2_window = "*"
 piston2d-opengl_graphics = "*"
 #opengles_graphics = { version = "*", path = "../opengles_graphics_updated" }
+font-kit = "*"
 
 
 rand = "*"

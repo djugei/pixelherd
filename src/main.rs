@@ -71,10 +71,35 @@ fn main() {
     };
 
     let ts = opengl_graphics::TextureSettings::new();
-    let mut cache =
-    //fixme: choose a font thats actually available on systems
-        opengl_graphics::GlyphCache::new("/usr/share/fonts/TTF/FiraCode-Regular.ttf", (), ts)
-            .unwrap();
+
+    // font_kit is a bit "heavy" i only need font loading, could not really find a good other lib
+    // for that though.
+    use font_kit::family_name::FamilyName;
+    use font_kit::handle::Handle;
+    use font_kit::properties::Properties;
+    use font_kit::source::SystemSource;
+
+    let fontprops = Properties::new();
+    let fontfam = [
+        FamilyName::Title("FiraCode".to_owned()),
+        FamilyName::SansSerif,
+    ];
+    let handle = SystemSource::new()
+        .select_best_match(&fontfam, &fontprops)
+        .unwrap();
+    // fixme: this will (probably soft-) fail on font collections, as i am ignoring the index.
+    // shouldbe building a rusttype::FontCollection and then select by index.
+    let fontdata: Result<std::path::PathBuf, Vec<u8>> = match handle {
+        Handle::Path { path, .. } => Ok(path),
+        Handle::Memory { bytes, .. } => Err((*bytes).clone()),
+    };
+    let mut cache = match fontdata.as_ref() {
+        Ok(path) => {
+            println!("using font: {:?}", path);
+            opengl_graphics::GlyphCache::new(path, (), ts).unwrap()
+        }
+        Err(bytes) => opengl_graphics::GlyphCache::from_bytes(bytes, (), ts).unwrap(),
+    };
 
     let mut speed = 1;
     let mut pause = false;

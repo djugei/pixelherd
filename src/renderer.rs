@@ -36,7 +36,7 @@ impl Renderer {
 
         let c = self.gl.draw_begin(args.viewport());
         let gl = &mut self.gl;
-        clear(WHITE, gl);
+        clear(BLACK, gl);
         for w in 0..config::FOOD_WIDTH {
             for h in 0..config::FOOD_HEIGHT {
                 let transform = c
@@ -48,14 +48,19 @@ impl Renderer {
                     .zoom(10.)
                     .scale(width / config::SIM_WIDTH, height / config::SIM_HEIGHT);
                 // maybe logscale this
-                let trans = app.foodgrid()[w][h]
+                let g = app.vegtables()[w][h]
                     // relaxed ordering should be fine, nobody should really be accessing the app
-                    // during render
+                    // during render (TM)
                     .load(atomic::Ordering::Relaxed)
                     .to_f64()
                     .min(10.)
                     / 10.;
-                rectangle([0.0, 1.0, 0.0, trans as f32], SQR, transform, gl);
+                let r = app.meat()[w][h]
+                    .load(atomic::Ordering::Relaxed)
+                    .to_f64()
+                    .min(10.)
+                    / 10.;
+                rectangle([r as f32, g as f32, 0.0, 1.0], SQR, transform, gl);
             }
         }
         // fixme move all coordinate calculations out
@@ -126,7 +131,7 @@ impl Renderer {
                     status.memory,
                 );
                 let size = 20_usize;
-                display_text(&display, glyph_cache, pos_transform, BLACK, size, gl).unwrap();
+                display_text(&display, glyph_cache, pos_transform, WHITE, size, gl).unwrap();
             } else {
                 polygon(status.rgb, TRI, transform, gl);
             }

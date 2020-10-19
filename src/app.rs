@@ -29,12 +29,32 @@ pub type FoodGrid = [[Atomic<TenRat>; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
 // safety: always change this in sync
 pub type OldFoodGrid = [[TenRat; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
 
+pub fn foodenv(center: [usize; 2], size: isize) -> impl Iterator<Item = [usize; 2]> {
+    (-size..=size)
+        .flat_map(move |y| (-size..size).zip(std::iter::repeat(y)))
+        .map(move |(x, y)| [center[0] as isize + x, center[1] as isize + y])
+        .map(wrap_food)
+}
+
+pub fn wrap_food(coor: [isize; 2]) -> [usize; 2] {
+    [
+        wrap(coor[0], config::FOOD_WIDTH),
+        wrap(coor[1], config::FOOD_HEIGHT),
+    ]
+}
+// this only does one wrap, so v coordinate needs to not be too negative
+pub fn wrap(v: isize, w: usize) -> usize {
+    let v = if v < 0 { v + (w as isize) } else { v } as usize;
+    v % w
+}
+
 #[derive(Debug)]
 pub struct App<B: Brain + Send + Clone + Sync> {
     genes: Vec<Genes<B>>,
     status: Vec<Status>,
-    foodgrid: FoodGrid,
-    // todo: replace with a simple sorted list
+    vegtables: FoodGrid,
+    // todo: consider giving meat a higher possible range (high risk/high reward)
+    meat: FoodGrid,
     tree: Tree,
     time: f64,
     rng: DetRng,
@@ -42,9 +62,12 @@ pub struct App<B: Brain + Send + Clone + Sync> {
     report_file: Option<std::fs::File>,
 }
 
-impl<B: Brain + Send + Clone + Sync> App<B> {
-    pub fn foodgrid(&self) -> &FoodGrid {
-        &self.foodgrid
+impl<B: Brain + Send + Sync> App<B> {
+    pub fn vegtables(&self) -> &FoodGrid {
+        &self.vegtables
+    }
+    pub fn meat(&self) -> &FoodGrid {
+        &self.meat
     }
     pub fn tree(&self) -> TreeRef<'_> {
         (&self.tree).into()
@@ -57,8 +80,9 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
     }
     pub fn new(seed: u64, report_path: Option<&str>) -> Self {
         let rng = DetRng::seed_from_u64(seed);
-        let foodgrid: OldFoodGrid =
+        let vegtables: OldFoodGrid =
             [[TenRat::from_int(0); config::FOOD_HEIGHT]; config::FOOD_WIDTH];
+        let meat: OldFoodGrid = [[TenRat::from_int(0); config::FOOD_HEIGHT]; config::FOOD_WIDTH];
         //safety: this is absolutely not safe as i am relying on the internal memory layout of a third
         // party library that is almost guaranteed to not match on 32 bit platforms.
         //
@@ -68,7 +92,8 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
         // atomics are not copy, so the [0.;times] constructor does not work
         // this is an actual value, not a reference so i need to actually change the value instead of
         // "as-casting" the pointer
-        let foodgrid = unsafe { std::mem::transmute(foodgrid) };
+        let vegtables = unsafe { std::mem::transmute(vegtables) };
+        let meat = unsafe { std::mem::transmute(meat) };
 
         let report_file = report_path.map(std::fs::File::create).map(Result::unwrap);
         // Create a new simulation and run it.
@@ -76,7 +101,8 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
             status: Vec::with_capacity(config::INITIAL_CELLS),
             genes: Vec::with_capacity(config::INITIAL_CELLS),
             tree: SpatVec::new_from(Vec::with_capacity(config::INITIAL_CELLS)),
-            foodgrid,
+            vegtables,
+            meat,
             time: 0.,
             last_report: 0.,
             rng,
@@ -93,7 +119,7 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
             for h in 0..config::FOOD_HEIGHT {
                 //fixme: this should be an exponential distribution instead
                 if app.rng.gen_range(0, 3) == 1 {
-                    *app.foodgrid[w][h].get_mut() = app.rng.gen_range(0., 10.).into();
+                    *app.vegtables[w][h].get_mut() = app.rng.gen_range(0., 10.).into();
                 }
             }
         }
@@ -115,8 +141,22 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
             .enumerate()
             .map(|(index, ((new, old), genes))| (index, old, Blip::from_components(new, genes)));
 
-        let mut oldgrid: OldFoodGrid = [[TenRat::from(0); config::FOOD_HEIGHT]; config::FOOD_WIDTH];
-        for (w, r) in oldgrid.iter_mut().zip(self.foodgrid.iter_mut()) {
+        let mut oldveg: OldFoodGrid = [[TenRat::from(0); config::FOOD_HEIGHT]; config::FOOD_WIDTH];
+        // maybe split this into two parts, a pure memcopy and the modification/clamp
+        for (w, r) in oldveg.iter_mut().zip(self.vegtables.iter_mut()) {
+            for (w, r) in w.iter_mut().zip(r.iter_mut()) {
+                // clamp to valid range on each iteration
+                // datatype is valid from -16 to 16
+                // but 0-10 is the only sensible value range for application domain
+                // this is important for determinism as saturations/wraparounds break determinism
+                // (well except we only do subtraction, so saturating would be fine)
+                *w = (*r.get_mut()).clamp((-1).into(), 12.into());
+            }
+        }
+
+        let mut oldmeat: OldFoodGrid = [[TenRat::from(0); config::FOOD_HEIGHT]; config::FOOD_WIDTH];
+        // maybe split this into two parts, a pure memcopy and the modification/clamp
+        for (w, r) in oldmeat.iter_mut().zip(self.meat.iter_mut()) {
             for (w, r) in w.iter_mut().zip(r.iter_mut()) {
                 // clamp to valid range on each iteration
                 // datatype is valid from -16 to 16
@@ -140,8 +180,10 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
                 old,
                 &self.status,
                 self.tree(),
-                &oldgrid,
-                &self.foodgrid,
+                &oldveg,
+                &self.vegtables,
+                &oldmeat,
+                &self.meat,
                 self.time,
                 args.dt,
             );
@@ -190,7 +232,7 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
             if self.rng.gen_bool(chance.min(1.)) {
                 let w: usize = self.rng.gen_range(0, config::FOOD_WIDTH);
                 let h: usize = self.rng.gen_range(0, config::FOOD_HEIGHT);
-                let grid = self.foodgrid[w][h].get_mut();
+                let grid = self.vegtables[w][h].get_mut();
                 // expected: 4, chances is divided by 4
                 // trying to get a less uniform food distribution
                 let f: TenRat = self.rng.gen_range(3., 5.).into();
@@ -232,107 +274,110 @@ impl<B: Brain + Send + Clone + Sync> App<B> {
             }
         }
     }
-    fn select_age(&self) -> f64 {
-        self.status
-            .get(
-                Selection::Age
-                    .select(self.status.iter().enumerate(), self.tree(), &[0., 0.])
-                    .unwrap(),
-            )
-            .unwrap()
-            .age
+}
+#[derive(Debug, PartialEq)]
+pub struct Report {
+    time: f64,
+    num: usize,
+    age: f64,
+    generation: usize,
+    spawns: usize,
+    lineage: f64,
+    veg: f64,
+    avg_veg: f64,
+    meat: f64,
+    avg_meat: f64,
+}
+impl<B: Brain + Send + Sync> App<B> {
+    // maybe return Iterater<Item = (Selection, Status)> instead
+    fn gen_report(&self) -> Option<Report> {
+        if self.status.len() == 0 {
+            return Option::None;
+        }
+        use Selection::*;
+        let selections = [Age, Generation, Spawns, Lineage];
+        let mut s = selections
+            .iter()
+            .map(|s| {
+                s.select(self.status.iter().enumerate(), self.tree(), &[0., 0.])
+                    .unwrap()
+            })
+            .map(|pos| self.status.get(pos).unwrap());
+
+        let veg: f64 = self
+            .vegtables
+            .iter()
+            .flat_map(|a| a.iter())
+            .map(|c| c.load(atomic::Ordering::Relaxed).to_f64())
+            .sum();
+        let meat: f64 = self
+            .meat
+            .iter()
+            .flat_map(|a| a.iter())
+            .map(|c| c.load(atomic::Ordering::Relaxed).to_f64())
+            .sum();
+        let fields = (config::FOOD_HEIGHT * config::FOOD_WIDTH) as f64;
+        Report {
+            time: self.time,
+            num: self.status.len(),
+            age: s.next().unwrap().age,
+            generation: s.next().unwrap().generation,
+            spawns: s.next().unwrap().children,
+            lineage: s.next().unwrap().lineage,
+            meat,
+            veg,
+            avg_veg: veg / fields,
+            avg_meat: meat / fields,
+        }
+        .into()
     }
-    fn select_generation(&self) -> usize {
-        self.status
-            .get(
-                Selection::Generation
-                    .select(self.status.iter().enumerate(), self.tree(), &[0., 0.])
-                    .unwrap(),
-            )
-            .unwrap()
-            .generation
-    }
-    fn select_children(&self) -> usize {
-        self.status
-            .get(
-                Selection::Spawns
-                    .select(self.status.iter().enumerate(), self.tree(), &[0., 0.])
-                    .unwrap(),
-            )
-            .unwrap()
-            .children
-    }
-    fn select_lineage(&self) -> f64 {
-        self.status
-            .get(
-                Selection::Lineage
-                    .select(self.status.iter().enumerate(), self.tree(), &[0., 0.])
-                    .unwrap(),
-            )
-            .unwrap()
-            .lineage
-    }
-    // takes &mut for the file write, kinda pointless since files are global state anyway
+
     pub fn report(&self) {
-        let num = self.genes.len();
-        if num == 0 {
-            println!("no blips at all");
-        } else {
-            // todo: express this nicer once .collect into arrays is available
-            // or just do a full report of all selections - mouse
-            let age = self.select_age();
-            let generation = self.select_generation();
-            let spawns = self.select_children();
-            let lineage = self.select_lineage();
-
-            let food: f64 = self
-                .foodgrid
-                .iter()
-                .flat_map(|a| a.iter())
-                .map(|c| c.load(atomic::Ordering::Relaxed).to_f64())
-                .sum();
-
-            let fields = (config::FOOD_HEIGHT * config::FOOD_WIDTH) as f64;
-
-            let avg_food = food / fields;
-
-            println!("report for         : {}", self.time);
-            println!("number of blips    : {}", num);
-            println!("oldest             : {}", age);
-            println!("highest generation : {}", generation);
-            println!("most reproduction  : {}", spawns);
-            println!("longest lineage    : {}", lineage);
-            println!("total food         : {}", food);
-            println!("average food       : {}", avg_food);
+        if let Some(r) = self.gen_report() {
+            println!("report for         : {}", r.time);
+            println!("number of blips    : {}", r.num);
+            println!("oldest             : {}", r.age);
+            println!("highest generation : {}", r.generation);
+            println!("most reproduction  : {}", r.spawns);
+            println!("longest lineage    : {}", r.lineage);
+            println!("total veg          : {}", r.veg);
+            println!("average veg        : {}", r.avg_veg);
+            println!("total meat         : {}", r.meat);
+            println!("average meat       : {}", r.avg_meat);
             println!();
+        } else {
+            println!("no blips at all");
         }
     }
 
+    // takes &mut for the file write, kinda pointless since files are global state anyway
     pub fn write_report(&mut self) {
-        let num = self.genes.len();
-        let age = self.select_age();
-        let generation = self.select_generation();
-        let spawns = self.select_children();
-        let lineage = self.select_lineage();
-        let time = self.time;
-
-        let food: f64 = self
-            .foodgrid
-            .iter_mut()
-            .flat_map(|a| a.iter_mut())
-            .map(|c| c.get_mut().to_f64())
-            .sum();
-
-        let fields = (config::FOOD_HEIGHT * config::FOOD_WIDTH) as f64;
-
-        let avg_food = food / fields;
-        self.report_file.as_mut().map(|f| {
+        if self.report_file.is_none() {
+            return;
+        }
+        let r = if let Some(r) = self.gen_report() {
+            r
+        } else {
+            return;
+        };
+        // can only do the match here cause borrow checker is not smart enough to notice that
+        // report_file is never accessed from the gen_report function.
+        if let Some(file) = self.report_file.as_mut() {
             let reportline = format!(
-                "{}, {}, {}, {}, {}, {}, {}, {}\n",
-                time, num, age, generation, spawns, lineage, food, avg_food
+                "{}, {}, {}, {}, {}, {}, {}, {}, {}, {}\n",
+                r.time,
+                r.num,
+                r.age,
+                r.generation,
+                r.spawns,
+                r.lineage,
+                r.veg,
+                r.avg_veg,
+                r.meat,
+                r.avg_meat
             );
-            std::io::Write::write_all(f, reportline.as_bytes()).unwrap();
-        });
+            std::io::Write::write_all(file, reportline.as_bytes()).unwrap();
+        }
     }
 }
 impl<B> PartialEq for App<B>
@@ -347,15 +392,25 @@ where
         if !base {
             return base;
         };
-        self.foodgrid
+        self.vegtables
             .iter()
-            .zip(&other.foodgrid)
+            .zip(&other.vegtables)
             .flat_map(|(s, o)| s.iter().zip(o.iter()))
             .all(|(s, o)| {
                 let s = s.load(atomic::Ordering::Relaxed);
                 let o = o.load(atomic::Ordering::Relaxed);
                 s == o
             })
+            && self
+                .meat
+                .iter()
+                .zip(&other.meat)
+                .flat_map(|(s, o)| s.iter().zip(o.iter()))
+                .all(|(s, o)| {
+                    let s = s.load(atomic::Ordering::Relaxed);
+                    let o = o.load(atomic::Ordering::Relaxed);
+                    s == o
+                })
     }
 }
 

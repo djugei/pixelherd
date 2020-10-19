@@ -22,14 +22,20 @@ pub struct Blip<'s, 'g, B: Brain> {
 }
 
 impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
+    // consider changing the signature to
+    // &old_status, &genes -> (new_status, option<newblip>)
+    // which could avoid a memcopy by MaybeUninit-initializing the new array
+    // and filling it with the new blips
     pub fn update<R: Rng>(
         &mut self,
         mut rng: R,
         old: &Status,
         olds: &[Status],
         tree: TreeRef,
-        oldgrid: &OldFoodGrid,
-        foodgrid: &FoodGrid,
+        oldveg: &OldFoodGrid,
+        veg: &FoodGrid,
+        oldmeat: &OldFoodGrid,
+        meat: &FoodGrid,
         time: f64,
         dt: f64,
     ) -> Option<(Status, Genes<B>)> {
@@ -88,9 +94,9 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
         let x = self.status.pos[0] / 10.;
         let y = self.status.pos[1] / 10.;
         let gridpos = [x as usize, y as usize];
-        let grid_slot = &foodgrid[gridpos[0]][gridpos[1]];
+        let grid_slot = &veg[gridpos[0]][gridpos[1]];
 
-        let mut grid_value_r = oldgrid[gridpos[0]][gridpos[1]];
+        let mut grid_value_r = oldveg[gridpos[0]][gridpos[1]];
         let grid_value = grid_value_r.to_f64();
 
         //todo: also smell distance from center of tile
@@ -204,6 +210,47 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
             None
         };
         self.status.age += dt;
+        if self.status.hp < 0. {
+            let age = self.status.age;
+            // todo: make this configurable
+            // todo: don't directly use age, use minimum consumed food during age
+            // first bit of food is directly given
+            let food = age.min(15.);
+            let remain = age - food;
+            // remainder is log2-ed
+            let food = (remain + 1.).log2();
+            let rad = 1;
+            let diam = (2 * rad) + 1;
+            let area = diam * diam;
+            let food = food / (area as f64);
+            let food = fix_rat::TenRat::aprox_float_fast(food).unwrap();
+            let range = crate::app::foodenv(gridpos, rad);
+
+            // maybe weight by distance from center
+            for pos in range {
+                let slot = &meat[pos[0]][pos[1]];
+                let mut val = slot.load(Ordering::Relaxed);
+                loop {
+                    // this is not a great way to handle this. ideas/observations:
+                    // 1) allow a bigger range (use Rational<{1<<10}>)
+                    // 2) hand off to synchronous code by setting hp to -inf or smth
+                    // 3) can't handle this in parallel code cause it would break determinism in
+                    //    every case.
+                    // 4) this is insanely rare
+                    let newval = val.checked_add(food).unwrap();
+                    // maybe use fetch_update instead
+                    match slot.compare_exchange(val, newval, Ordering::Relaxed, Ordering::Relaxed) {
+                        Ok(_) => {
+                            break;
+                        }
+                        Err(v) => {
+                            val = v;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
         ret
     }
 

@@ -27,6 +27,8 @@ fix-rat = {path="../fix-rat", features = ["serde1"]}
 
 serde = "*"
 serde_derive = "*"
+bigmatrix = {path="../bigmatrix"}
+bincode = "*"
 
 [profile.dev.package."*"]
 # Set the default for dependencies in Development mode.

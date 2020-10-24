@@ -53,22 +53,50 @@ pub fn wrap(v: isize, w: usize) -> usize {
     let v = if v < 0 { v + (w as isize) } else { v } as usize;
     v % w
 }
-//use serde_derive::{Deserialize, Serialize};
-//#[derive(Serialize, Deserialize)]
-// (de)serialize is not implemented on big arrays in the serde version i am using.
-#[allow(unused)]
+
+use bigmatrix::BigMatrix;
+use serde_derive::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SerializeApp<B: Brain> {
     genes: Vec<Genes<B>>,
     status: Vec<Status>,
+    #[serde(with = "BigMatrix")]
     vegtables: OldVegGrid,
+    #[serde(with = "BigMatrix")]
     meat: OldMeatGrid,
     time: f64,
     rng: DetRng,
     last_report: f64,
 }
 
+impl<B: Brain + Send + Sync> SerializeApp<B> {
+    fn unpack(self) -> App<B> {
+        App {
+            genes: self.genes,
+            status: self.status,
+            time: self.time,
+            rng: self.rng,
+            last_report: self.last_report,
+            //todo: move tree building and grid (re-) construction into methods
+            ..todo!()
+        }
+    }
+    fn pack(other: App<B>) -> Self {
+        Self {
+            genes: other.genes,
+            status: other.status,
+            time: other.time,
+            rng: other.rng,
+            last_report: other.last_report,
+            // yeah the grid transmutes need to go into their own functions
+            ..todo!()
+        }
+    }
+}
+
 #[derive(Debug)]
-pub struct App<B: Brain + Send + Clone + Sync> {
+pub struct App<B: Brain + Send + Sync> {
     genes: Vec<Genes<B>>,
     status: Vec<Status>,
     vegtables: VegGrid,
@@ -546,4 +574,27 @@ fn float_assoc_trunc() {
             }
         }
     }
+}
+
+#[test]
+fn matrix_ser_de() {
+    #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Copy, Clone)]
+    struct T {
+        #[serde(with = "BigMatrix")]
+        e: [[usize; 33]; 44],
+    }
+    let mut t: T = T {
+        e: [[Default::default(); 33]; 44],
+    };
+    let mut rng = rand::thread_rng();
+    for l in t.e.iter_mut() {
+        for e in l.iter_mut() {
+            *e = rng.gen();
+        }
+    }
+    let t = t;
+    use bincode;
+    let ser: Vec<u8> = bincode::serialize(&t).unwrap();
+    let de = bincode::deserialize(&ser[..]).unwrap();
+    assert_eq!(t, de);
 }

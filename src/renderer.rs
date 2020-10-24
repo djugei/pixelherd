@@ -67,11 +67,9 @@ impl Renderer {
         // ideally i would have two types, simpos and screenpos
         let sim_x = self.mousepos[0] * config::SIM_WIDTH / width;
         let sim_y = self.mousepos[1] * config::SIM_HEIGHT / height;
-        let marker = self.selection.select(
-            app.statuses().iter().enumerate(),
-            app.tree(),
-            &[sim_x, sim_y],
-        );
+        let marker = self
+            .selection
+            .select(app.blips_ro().enumerate(), app.tree(), &[sim_x, sim_y]);
         for (index, (status, genes)) in app.blips_ro().enumerate() {
             let (px, py) = (status.pos[0], status.pos[1]);
             let (pdx, pdy) = (status.vel[0], status.vel[1]);
@@ -121,7 +119,7 @@ impl Renderer {
                     );
                 }
                 let display = format!(
-                    "children: {}\nhp: {:.2}\ngeneration: {}\nage: {:.2}\nheading: {:.2}\nspeed: {:.2?}\nmemory: {:.4?}",
+                    "children: {}\nhp: {:.2}\ngeneration: {}\nage: {:.2}\nheading: {:.2}\nspeed: {:.2?}\nmemory: {:.4?}\nvore: {:.2}",
                     status.children,
                     status.hp,
                     status.generation,
@@ -129,6 +127,7 @@ impl Renderer {
                     base_angle,
                     vecmath::len(status.vel),
                     status.memory,
+                    genes.vore,
                 );
                 let size = 20_usize;
                 display_text(&display, glyph_cache, pos_transform, WHITE, size, gl).unwrap();

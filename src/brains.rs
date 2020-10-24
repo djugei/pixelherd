@@ -60,9 +60,9 @@ pub struct Outputs {
 }
 impl Outputs {
     // fixme: shouldn't this be 0-1?
-    /// (-0.5, 0.5)
+    /// (0, 1)
     pub fn spike(&self) -> f64 {
-        self.data[0]
+        self.data[0] + 0.5
     }
     /// (-0.5, 0.5)
     pub fn steering(&self) -> f64 {

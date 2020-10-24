@@ -1,10 +1,9 @@
 // todo:
 // 3. port one or both of the brains from c++
 // 7. add state, both for pausing/resuming simulation and for extracting successful specimen
-// 8. add carnivores, currently the simulation is undergoing boom- and bust-cycles, predators fix
-//    that a bit
 // 10. make sure distance calculations correctly work with the wraparound world (hint: rn they
 //     don't)
+// 11. balance simulation so scavenging and hunting are valid strategies
 
 use opengl_graphics::{GlGraphics, OpenGL};
 use sdl2_window::Sdl2Window as Window;
@@ -111,7 +110,13 @@ fn main() {
             match args.button {
                 input::Button::Keyboard(input::keyboard::Key::A) => {
                     if args.state == input::ButtonState::Release {
-                        render.selection = render.selection.next();
+                        render.selection = render.selection.rotate();
+                        println!("now highlighting {:?}", render.selection);
+                    }
+                }
+                input::Button::Keyboard(input::keyboard::Key::E) => {
+                    if args.state == input::ButtonState::Release {
+                        render.selection = render.selection.rotate_rev();
                         println!("now highlighting {:?}", render.selection);
                     }
                 }

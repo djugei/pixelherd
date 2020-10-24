@@ -6,7 +6,7 @@ use crate::select::Selection;
 use anti_r::vec::SpatVec;
 use anti_r::SpatSlice;
 use atomic::Atomic;
-use fix_rat::TenRat;
+use fix_rat::{HundRat, TenRat};
 use piston::input::UpdateArgs;
 use rand::Rng;
 use rand::SeedableRng;
@@ -25,9 +25,15 @@ pub type TreeRef<'a> = SpatSlice<'a, [f64; 2], usize>;
 // using TenRat instead of f64 here to get associativity, which is important cause of multithreading
 // todo: consider creating a real type for the foodgrid
 // each step foodgrid is copied into a read only and a (synchronized) write-only part
-pub type FoodGrid = [[Atomic<TenRat>; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
+type FoodGrid<T> = [[Atomic<T>; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
 // safety: always change this in sync
-pub type OldFoodGrid = [[TenRat; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
+type OldFoodGrid<T> = [[T; config::FOOD_HEIGHT]; config::FOOD_WIDTH];
+
+pub type VegGrid = FoodGrid<TenRat>;
+pub type OldVegGrid = OldFoodGrid<TenRat>;
+
+pub type MeatGrid = FoodGrid<HundRat>;
+pub type OldMeatGrid = OldFoodGrid<HundRat>;
 
 pub fn foodenv(center: [usize; 2], size: isize) -> impl Iterator<Item = [usize; 2]> {
     (-size..=size)
@@ -52,10 +58,11 @@ pub fn wrap(v: isize, w: usize) -> usize {
 pub struct App<B: Brain + Send + Clone + Sync> {
     genes: Vec<Genes<B>>,
     status: Vec<Status>,
-    vegtables: FoodGrid,
+    vegtables: VegGrid,
     // todo: consider giving meat a higher possible range (high risk/high reward)
-    meat: FoodGrid,
+    meat: MeatGrid,
     tree: Tree,
+    // todo: complete switch to a tick based system (i.e. usize counter with global float stepsize)
     time: f64,
     rng: DetRng,
     last_report: f64,
@@ -63,10 +70,10 @@ pub struct App<B: Brain + Send + Clone + Sync> {
 }
 
 impl<B: Brain + Send + Sync> App<B> {
-    pub fn vegtables(&self) -> &FoodGrid {
+    pub fn vegtables(&self) -> &VegGrid {
         &self.vegtables
     }
-    pub fn meat(&self) -> &FoodGrid {
+    pub fn meat(&self) -> &MeatGrid {
         &self.meat
     }
     pub fn tree(&self) -> TreeRef<'_> {
@@ -80,9 +87,9 @@ impl<B: Brain + Send + Sync> App<B> {
     }
     pub fn new(seed: u64, report_path: Option<&str>) -> Self {
         let rng = DetRng::seed_from_u64(seed);
-        let vegtables: OldFoodGrid =
+        let vegtables: OldVegGrid =
             [[TenRat::from_int(0); config::FOOD_HEIGHT]; config::FOOD_WIDTH];
-        let meat: OldFoodGrid = [[TenRat::from_int(0); config::FOOD_HEIGHT]; config::FOOD_WIDTH];
+        let meat: OldMeatGrid = [[HundRat::from_int(0); config::FOOD_HEIGHT]; config::FOOD_WIDTH];
         //safety: this is absolutely not safe as i am relying on the internal memory layout of a third
         // party library that is almost guaranteed to not match on 32 bit platforms.
         //
@@ -136,40 +143,49 @@ impl<B: Brain + Send + Sync> App<B> {
 
         let iter = new
             .par_iter_mut()
-            .zip(&self.status)
             .zip(&self.genes)
             .enumerate()
-            .map(|(index, ((new, old), genes))| (index, old, Blip::from_components(new, genes)));
+            .map(|(index, (new, genes))| (index, Blip::from_components(new, genes)));
 
-        let mut oldveg: OldFoodGrid = [[TenRat::from(0); config::FOOD_HEIGHT]; config::FOOD_WIDTH];
-        // maybe split this into two parts, a pure memcopy and the modification/clamp
-        for (w, r) in oldveg.iter_mut().zip(self.vegtables.iter_mut()) {
-            for (w, r) in w.iter_mut().zip(r.iter_mut()) {
-                // clamp to valid range on each iteration
-                // datatype is valid from -16 to 16
-                // but 0-10 is the only sensible value range for application domain
-                // this is important for determinism as saturations/wraparounds break determinism
-                // (well except we only do subtraction, so saturating would be fine)
-                *w = (*r.get_mut()).clamp((-1).into(), 12.into());
-            }
-        }
+        // todo: this is the most calculation intensive sequential part, maybe utilising some
+        // unsafe/maybeuninit would be worth it.
+        let mut oldveg: Box<OldVegGrid> =
+            Box::new([[TenRat::from(0); config::FOOD_HEIGHT]; config::FOOD_WIDTH]);
+        let mut oldmeat: Box<OldMeatGrid> =
+            Box::new([[HundRat::from(0); config::FOOD_HEIGHT]; config::FOOD_WIDTH]);
 
-        let mut oldmeat: OldFoodGrid = [[TenRat::from(0); config::FOOD_HEIGHT]; config::FOOD_WIDTH];
-        // maybe split this into two parts, a pure memcopy and the modification/clamp
-        for (w, r) in oldmeat.iter_mut().zip(self.meat.iter_mut()) {
-            for (w, r) in w.iter_mut().zip(r.iter_mut()) {
-                // clamp to valid range on each iteration
-                // datatype is valid from -16 to 16
-                // but 0-10 is the only sensible value range for application domain
-                // this is important for determinism as saturations/wraparounds break determinism
-                // (well except we only do subtraction, so saturating would be fine)
-                *w = (*r.get_mut()).clamp((-1).into(), 12.into());
-            }
-        }
+        let vegs = self.vegtables.par_iter_mut();
+        let meats = self.meat.par_iter_mut();
+        rayon::join(
+            || {
+                oldveg.par_iter_mut().zip(vegs).for_each(|(w, r)| {
+                    for (w, r) in w.iter_mut().zip(r.iter_mut()) {
+                        // clamp to valid range on each iteration
+                        // datatype is valid from -16 to 16
+                        // but 0-10 is the only sensible value range for application domain
+                        // this is important for determinism as saturations/wraparounds break determinism
+                        // (well except we only do subtraction, so saturating would be fine)
+                        *w = (*r.get_mut()).clamp((-1).into(), 12.into());
+                    }
+                })
+            },
+            || {
+                oldmeat.par_iter_mut().zip(meats).for_each(|(w, r)| {
+                    for (w, r) in w.iter_mut().zip(r.iter_mut()) {
+                        // clamp to valid range on each iteration
+                        // datatype is valid from -128 to 128
+                        // but 0-10 is the only sensible value range for application domain
+                        // this is important for determinism as saturations/wraparounds break determinism
+                        // (well except we only do subtraction, so saturating would be fine)
+                        *w = (*r.get_mut()).clamp((-1).into(), 70.into());
+                    }
+                })
+            },
+        );
 
         // new is write only. if you need data from the last iteration
         // get it from old only.
-        iter.for_each(|(index, old, mut new)| {
+        iter.for_each(|(index, mut new)| {
             let seed = self.time.to_bits();
             let seed = seed ^ (index as u64);
             // todo: better seeding, can seed from root rng, store rng with blip
@@ -177,8 +193,8 @@ impl<B: Brain + Send + Sync> App<B> {
 
             let spawn = new.update(
                 &mut rng,
-                old,
                 &self.status,
+                &self.genes,
                 self.tree(),
                 &oldveg,
                 &self.vegtables,
@@ -217,8 +233,29 @@ impl<B: Brain + Send + Sync> App<B> {
             self.genes.remove(i);
         }
 
+        // make sure there is at least some vegetables and meat eaters each
+        let (min, max) = self
+            .genes
+            .iter()
+            .map(|g| g.vore)
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |old, new| {
+                (old.0.min(new), old.1.max(new))
+            });
+        if min > 0.5 {
+            let (s, mut g) = Blip::new(&mut self.rng);
+            g.vore = (g.vore - 0.1).max(0.);
+            new.push(s);
+            self.genes.push(g);
+        }
+        if max < 0.5 {
+            let (s, mut g) = Blip::new(&mut self.rng);
+            g.vore = (g.vore + 0.1).min(1.);
+            new.push(s);
+            self.genes.push(g);
+        }
+
         if new.len() < config::REPLACEMENT {
-            println!("force-spawned");
+            //println!("force-spawned");
             let (s, g) = Blip::new(&mut self.rng);
             new.push(s);
             self.genes.push(g);
@@ -299,7 +336,7 @@ impl<B: Brain + Send + Sync> App<B> {
         let mut s = selections
             .iter()
             .map(|s| {
-                s.select(self.status.iter().enumerate(), self.tree(), &[0., 0.])
+                s.select(self.blips_ro().enumerate(), self.tree(), &[0., 0.])
                     .unwrap()
             })
             .map(|pos| self.status.get(pos).unwrap());
@@ -360,8 +397,6 @@ impl<B: Brain + Send + Sync> App<B> {
         } else {
             return;
         };
-        // can only do the match here cause borrow checker is not smart enough to notice that
-        // report_file is never accessed from the gen_report function.
         if let Some(file) = self.report_file.as_mut() {
             let reportline = format!(
                 "{}, {}, {}, {}, {}, {}, {}, {}, {}, {}\n",

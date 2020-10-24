@@ -4,9 +4,8 @@ use rand::Rng;
 use crate::brains;
 use crate::brains::Brain;
 
-use crate::app::FoodGrid;
-use crate::app::OldFoodGrid;
 use crate::app::TreeRef;
+use crate::app::{MeatGrid, OldMeatGrid, OldVegGrid, VegGrid};
 
 use crate::vecmath;
 use crate::vecmath::Vector;
@@ -29,13 +28,13 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
     pub fn update<R: Rng>(
         &mut self,
         mut rng: R,
-        old: &Status,
         olds: &[Status],
+        oldg: &[Genes<B>],
         tree: TreeRef,
-        oldveg: &OldFoodGrid,
-        veg: &FoodGrid,
-        oldmeat: &OldFoodGrid,
-        meat: &FoodGrid,
+        oldveg: &OldVegGrid,
+        veg: &VegGrid,
+        oldmeat: &OldMeatGrid,
+        meat: &MeatGrid,
         time: f64,
         dt: f64,
     ) -> Option<(Status, Genes<B>)> {
@@ -45,12 +44,14 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
 
         let search = tree.query_distance(&self.status.pos, config::b::LOCAL_ENV);
 
-        let base_angle = base_angle(&self.status);
+        let own_base_angle = base_angle(&self.status);
         let mut eyedists = [(f64::INFINITY, 0., 0); config::b::N_EYES];
         let mut eye_angles = [0.; config::b::N_EYES];
         for i in 0..config::b::N_EYES {
-            eye_angles[i] = eye_angle(base_angle, self.genes.eyes[i]);
+            eye_angles[i] = eye_angle(own_base_angle, self.genes.eyes[i]);
         }
+
+        let mut spiked = false;
 
         for (dist_squared, (_p, index)) in search {
             // sound
@@ -62,9 +63,15 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
             *inputs.sound_mut() += nb_sound / dist_squared;
 
             for (i, eye) in eye_angles.iter().enumerate() {
-                let fov = 0.2 * std::f64::consts::PI;
+                // 1/10th of a full circle
+                // todo: evolve this
+                let fov = 0.1 * std::f64::consts::TAU;
                 let angle = eye_vision(&self.status, *eye, nb.pos);
                 // see the closest one in fov
+                // todo: i can sort the searches by distance
+                //  + faster angle calcuations as i only need to get the first matching (atan2 is
+                //    expensive)
+                //  - need to actually alloc&sort the search
                 if angle.abs() < fov && eyedists[i].0 > dist_squared {
                     eyedists[i] = (dist_squared, angle, *index);
                 }
@@ -85,6 +92,39 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
                     }
                 }
             }
+            // todo: since this is doing a second range check it could be good to do a separate
+            // query, but i am not sure if this would actually speed things up.
+            if dist_squared < (5. * 5.) {
+                // don't spike others on each hit, only once
+                if self.status.spike > 0.3 {
+                    // todo: rename eye_vision, spike is an "eye" pointing straight ahead.
+                    let col_angle = eye_vision(&self.status, own_base_angle, nb.pos);
+                    if col_angle < (0.05 * std::f64::consts::TAU) {
+                        self.status.spike -= 0.3 * dt;
+                    }
+                }
+                // get spiked
+                if nb.spike > 0.3 {
+                    let nbg = &oldg.get(*index).unwrap();
+                    if nbg.vore > 0.3 {
+                        let relspeed = vecmath::len(vecmath::add(self.status.vel, nb.vel));
+                        if relspeed > 1.5 {
+                            let other_base = base_angle(&nb);
+                            let col_angle = eye_vision(&nb, other_base, self.status.pos);
+                            // in range, they have an extended spike, pointing at us, significant
+                            // speed difference, they are not fully herbivore
+                            if col_angle < (0.05 * std::f64::consts::TAU) {
+                                // i should really move to fixed step size.
+                                let damageconst = 1.;
+                                let damage = damageconst * relspeed * nbg.vore * nb.spike * dt;
+                                //println!("took {} damage from {}", damage, index);
+                                self.status.hp -= damage;
+                                spiked = true;
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // rust apparently does the modulo [-pi/2, pi/2] internally
@@ -96,12 +136,8 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
         let gridpos = [x as usize, y as usize];
         let grid_slot = &veg[gridpos[0]][gridpos[1]];
 
-        let mut grid_value_r = oldveg[gridpos[0]][gridpos[1]];
+        let grid_value_r = oldveg[gridpos[0]][gridpos[1]];
         let grid_value = grid_value_r.to_f64();
-
-        //todo: also smell distance from center of tile
-        // food is ~ 0-10+, scale to -5 to 5+
-        *inputs.smell_mut() = grid_value - 5.;
 
         let xfrac = x.fract();
         let yfrac = y.fract();
@@ -113,43 +149,64 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
 
         // eat food
         //todo: put into config
-        // can eat 10 food / second (arbitrary)
-        let max = 10. * dt;
-        // half consumption speed on basically empty square
-        // full consumption on 5 food, double on 15
-        let gridfactor = 0.5 + (grid_value / 10.);
-        // 1..11
-        let div = 1. + (outputs.speed() * 2.5);
-        let consumption = (max * gridfactor / div).min(grid_value);
+        let consumption_c = |grid_value: f64| {
+            // can eat 10 food / second (arbitrary)
+            let max = 10. * dt;
+            // half consumption speed on basically empty square
+            // full consumption on 5 food, double on 15
+            let gridfactor = 0.5 + (grid_value / 10.);
+            // 1..11
+            let div = 1. + (outputs.speed() * 2.5);
+            let consumption = (max * gridfactor / div).min(grid_value);
+            consumption
+        };
+        let consumption = (consumption_c)(grid_value) * (1. - self.genes.vore);
         if consumption > 0. && !consumption.is_nan() {
             let consumption_r: fix_rat::TenRat = consumption.into();
-            // retry writing the delta
-            // todo: rename variables for clarity
-            loop {
-                // gotta do all determinitic calculations in rationals
-                let newval = grid_value_r - consumption_r;
-                // there is no synchronization between threads, only the global food object
-                // so only the atomic operaton on it needs to be taken care of.
-                // there is no other operations to synchronize
-                // relaxed ordering should therefore be fine to my best knowledge
-                match grid_slot.compare_exchange(
-                    grid_value_r,
-                    newval,
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                ) {
-                    Ok(_) => {
-                        self.status.food += consumption;
-                        break;
-                    }
-                    Err(v) => {
-                        //println!("{:?} had to reloop for cas", gridpos);
-                        grid_value_r = v;
-                        continue;
-                    }
-                }
-            }
+            // there is no synchronization between threads, only the global food object
+            // so only the atomic operaton on it needs to be taken care of.
+            // there is no other operations to synchronize
+            // relaxed ordering should therefore be fine to my best knowledge
+            // gotta do all deterministic calculations in rationals
+            grid_slot
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |old| {
+                    Some(old - consumption_r)
+                })
+                .unwrap();
         }
+
+        let meat_grid_slot = &meat[gridpos[0]][gridpos[1]];
+
+        let meat_grid_value_r = oldmeat[gridpos[0]][gridpos[1]];
+        let meat_grid_value = meat_grid_value_r.to_f64();
+        let meat_consumption = if self.genes.vore < 0.2 {
+            0.
+        } else {
+            // can eat 10 food / second (arbitrary)
+            let max = 10. * dt;
+            // half consumption speed on basically empty square
+            // full consumption on 5 food, double on 15
+            let gridfactor = 0.5 + (meat_grid_value / 10.);
+            // meat consumption is not limited by speed
+            let consumption = (max * gridfactor).min(meat_grid_value).min(0.1);
+            let consumption = consumption * self.genes.vore * 2.;
+            consumption
+        };
+        if meat_consumption > 0. && !meat_consumption.is_nan() {
+            let consumption_r: fix_rat::HundRat = consumption.into();
+            // never fails cause we never return None
+            meat_grid_slot
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |old| {
+                    let new = old - consumption_r;
+                    Some(new)
+                })
+                .unwrap();
+            self.status.food += consumption;
+        }
+        // food is ~ 0-10+, scale to -5 to 5+
+        // maybe split this into two inputs
+        *inputs.smell_mut() = ((grid_value - 5.) * (1. - self.genes.vore))
+            + ((meat_grid_value - 5.) * (self.genes.vore));
 
         self.status
             .memory
@@ -172,17 +229,18 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
         ];
 
         // now outputs are filled, time to act on them
-        let spike = self.status.spike + outputs.spike() / 2.;
+        let spike = self.status.spike * (1. - dt);
+        let spike = spike + (outputs.spike() * dt);
         self.status.spike = spike.min(1.).max(0.);
 
         // change direction
         let steer = [0., outputs.steering()];
         // fixme: handle 0 speed
-        let dir = vecmath::norm(old.vel);
+        let dir = vecmath::norm(self.status.vel);
 
         let push = vecmath::rotate(steer, dir);
 
-        let mut vel = vecmath::add(old.vel, push);
+        let mut vel = vecmath::add(self.status.vel, push);
         // todo: be smarter about scaling speed, maybe do some log-stuff to simulate drag
         vel = vecmath::norm(vel);
         vel = vecmath::scale(vel, outputs.speed());
@@ -199,7 +257,7 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
         self.status.hp -= exhaustion;
 
         // reproduce & mutate
-        // reproduction is a bit of a problem since it needs to ad new entries to the vec
+        // reproduction is a bit of a problem since it needs to add new entries to the vec
         // which is kinda bad for multithreading.
         // its a rather rare event though so its special-cased
 
@@ -210,44 +268,46 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
             None
         };
         self.status.age += dt;
+
+        // time to die :)
         if self.status.hp < 0. {
             let age = self.status.age;
             // todo: make this configurable
             // todo: don't directly use age, use minimum consumed food during age
             // first bit of food is directly given
-            let food = age.min(15.);
+            let food = age.min(50.);
             let remain = age - food;
+            if spiked {
+                println!("dying from spiking")
+            };
+            // give less food if died of starvation
+            let spiked = if spiked { 1. } else { 0.5 };
             // remainder is log2-ed
-            let food = (remain + 1.).log2();
-            let rad = 1;
-            let diam = (2 * rad) + 1;
-            let area = diam * diam;
-            let food = food / (area as f64);
-            let food = fix_rat::TenRat::aprox_float_fast(food).unwrap();
-            let range = crate::app::foodenv(gridpos, rad);
+            let total_food = (food + (remain + 1.).log2()) * spiked;
 
-            // maybe weight by distance from center
-            for pos in range {
-                let slot = &meat[pos[0]][pos[1]];
-                let mut val = slot.load(Ordering::Relaxed);
-                loop {
-                    // this is not a great way to handle this. ideas/observations:
-                    // 1) allow a bigger range (use Rational<{1<<10}>)
-                    // 2) hand off to synchronous code by setting hp to -inf or smth
-                    // 3) can't handle this in parallel code cause it would break determinism in
-                    //    every case.
-                    // 4) this is insanely rare
-                    let newval = val.checked_add(food).unwrap();
-                    // maybe use fetch_update instead
-                    match slot.compare_exchange(val, newval, Ordering::Relaxed, Ordering::Relaxed) {
-                        Ok(_) => {
-                            break;
-                        }
-                        Err(v) => {
-                            val = v;
-                            continue;
-                        }
-                    }
+            // more food in center, less spilled
+            let rads = [0, 1, 2];
+            let foods = [total_food / 2., total_food / 4., total_food / 4.];
+            for (rad, food) in rads.iter().zip(&foods) {
+                let diam = (2 * rad) + 1;
+                let area = diam * diam;
+                let food = food / (area as f64);
+                let food = fix_rat::HundRat::aprox_float_fast(food).unwrap();
+                let range = crate::app::foodenv(gridpos, *rad);
+
+                for pos in range {
+                    let slot = &meat[pos[0]][pos[1]];
+                    slot.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |old| {
+                        // this is not a great way to handle this. ideas/observations:
+                        // 2) hand off to synchronous code by setting hp to -inf or smth (need to
+                        //    roll back previous changes though!)
+                        // 3) can't handle this in parallel code cause it would break determinism in
+                        //    every case.
+                        // 4) this is insanely rare
+                        // todo: meat is now ~0-100 adjust assumptions accordingly
+                        old.checked_add(food)
+                    })
+                    .unwrap();
                 }
             }
         }
@@ -349,6 +409,8 @@ pub struct Genes<B: Brain> {
     pub clockstretch_2: f64,
     // 3 eyes, each represented by an angle in radians [-pi-pi]
     pub eyes: [f64; config::b::N_EYES],
+    // 0-1 0: fully herbivore, 1 fully carnivore
+    pub vore: f64,
 }
 
 impl<B: Brain> Genes<B> {
@@ -367,6 +429,7 @@ impl<B: Brain> Genes<B> {
             ],
             //eyes: [(-2. / 3.) * PI, 0., (2. / 3.) * PI],
             //eyes: [0., 0., 0.],
+            vore: rng.gen_range(0., 1.),
         }
     }
 
@@ -395,6 +458,12 @@ impl<B: Brain> Genes<B> {
             // wrap around
             *eye %= PI;
         }
+
+        let vore = self.vore
+            + rng
+                .gen_range(-self.mutation_rate, self.mutation_rate)
+                .max(0.)
+                .min(1.);
         Self {
             brain,
             repr_tres,
@@ -402,6 +471,7 @@ impl<B: Brain> Genes<B> {
             clockstretch_1,
             clockstretch_2,
             eyes,
+            vore,
         }
     }
 }
@@ -422,7 +492,6 @@ pub fn eye_angle(base_angle: f64, eye: f64) -> f64 {
 /// -pi-pi
 pub fn eye_vision(
     status: &Status,
-    //heading of the blip
     // absolute heading of the eye
     eye_angle: f64,
     other: Vector,

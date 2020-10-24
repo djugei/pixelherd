@@ -1,3 +1,5 @@
+//todo: extract a lot of numbers into config.
+//todo: make config dynamic (read at start of runtime)
 pub const FOOD_WIDTH: usize = 50;
 pub const FOOD_HEIGHT: usize = 50;
 

@@ -116,7 +116,7 @@ pub trait Brain: Clone {
 // any input. maybe i can do a 2-step-process where i first use a 1-layer brain
 // and then add another layer between it and the input (or the output) with most weights
 // initialized to ~0, and one to ~1.
-#[derive(Copy, Clone, Default, PartialEq)]
+#[derive(Copy, Clone, Default, PartialEq, Debug, Serialize, Deserialize)]
 pub struct BigBrain {
     // each output gets a weight for each input
     in2mid: [[f64; N_INPUTS]; INNER_SIZE],
@@ -206,7 +206,9 @@ impl Brain for BigBrain {
     }
 }
 
-#[derive(Copy, Clone, Default, PartialEq, Debug)]
+use serde_derive::{Deserialize, Serialize};
+
+#[derive(Copy, Clone, Default, PartialEq, Debug, Serialize, Deserialize)]
 pub struct SimpleBrain {
     // each output gets a weight for each input
     weights: [[f64; N_INPUTS]; INNER_SIZE],

@@ -10,7 +10,7 @@ use fix_rat::{HundRat, TenRat};
 use piston::input::UpdateArgs;
 use rand::Rng;
 use rand::SeedableRng;
-use rand_chacha::ChaCha8Rng as DetRng;
+use rand_pcg::Pcg64Mcg as DetRng;
 use rayon::prelude::IndexedParallelIterator;
 use rayon::prelude::IntoParallelRefMutIterator;
 use rayon::prelude::ParallelIterator;
@@ -52,6 +52,19 @@ pub fn wrap_food(coor: [isize; 2]) -> [usize; 2] {
 pub fn wrap(v: isize, w: usize) -> usize {
     let v = if v < 0 { v + (w as isize) } else { v } as usize;
     v % w
+}
+//use serde_derive::{Deserialize, Serialize};
+//#[derive(Serialize, Deserialize)]
+// (de)serialize is not implemented on big arrays in the serde version i am using.
+#[allow(unused)]
+pub struct SerializeApp<B: Brain> {
+    genes: Vec<Genes<B>>,
+    status: Vec<Status>,
+    vegtables: OldVegGrid,
+    meat: OldMeatGrid,
+    time: f64,
+    rng: DetRng,
+    last_report: f64,
 }
 
 #[derive(Debug)]

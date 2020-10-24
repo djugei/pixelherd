@@ -17,13 +17,16 @@ font-kit = "*"
 
 
 rand = "*"
-rand_chacha = "*"
+rand_pcg = { version = "*", features = ["serde1"] } 
 inline_tweak = "*"
 
 
 rayon = "*"
 atomic = "*"
-fix-rat = {path="../fix-rat"}
+fix-rat = {path="../fix-rat", features = ["serde1"]}
+
+serde = "*"
+serde_derive = "*"
 
 [profile.dev.package."*"]
 # Set the default for dependencies in Development mode.

@@ -381,7 +381,9 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Default, Debug)]
+use serde_derive::{Deserialize, Serialize};
+
+#[derive(Copy, Clone, PartialEq, Default, Debug, Serialize, Deserialize)]
 pub struct Status {
     pub pos: [f64; 2],
     pub vel: [f64; 2],
@@ -399,7 +401,7 @@ pub struct Status {
     pub lineage: f64,
 }
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Genes<B: Brain> {
     pub brain: B,
     pub mutation_rate: f64,

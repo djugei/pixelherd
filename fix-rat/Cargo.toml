@@ -1,0 +1,16 @@
+[package]
+name = "fix-rat"
+version = "0.1.0"
+authors = ["djugei <ddjugei@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+num-traits = { version = "*", default-features = false }
+serde = { version = "*" , optional = true}
+
+[features]
+default = ["nightly", "serde"]
+nightly = []
+serde1 = ["serde"]

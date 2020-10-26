@@ -1,0 +1,13 @@
+[workspace]
+members = ["pixelherd", "anti-r", "bigmatrix", "fix-rat"]
+
+[profile.dev.package."*"]
+# Set the default for dependencies in Development mode.
+opt-level = 3
+
+[profile.dev]
+opt-level = 3
+panic="abort"
+
+[profile.release]
+panic="abort"

@@ -16,6 +16,8 @@ pub type TenRat = Rational<{ i64::MAX / 16 }>;
 pub type HundRat = Rational<{ i64::MAX / 128 }>;
 
 mod nightly {
+    #[cfg(feature = "serde1")]
+    use serde as sd;
     /// a ratonal number with a fixed denom, therefore
     /// sizeof\<Rational> == sizeof\<i64>. plus operations have more intuitive valid ranges
     ///
@@ -30,6 +32,7 @@ mod nightly {
     /// i would strongly recommend to choose denom as a 2.exp(x)
     #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
     #[repr(transparent)]
+    #[cfg_attr(feature = "serde1", derive(sd::Serialize, sd::Deserialize))]
     pub struct Rational<const DENOM: i64> {
         numer: i64,
     }
@@ -201,54 +204,6 @@ mod nightly {
         }
     }
     */
-
-    #[cfg(feature = "serde")]
-    use serde::{ser::SerializeStruct, Serialize, Serializer};
-    #[cfg(feature = "serde")]
-    impl<const DENOM: i64> Serialize for Rational<DENOM> {
-        fn serialize<S>(
-            &self,
-            ser: S,
-        ) -> core::result::Result<<S as Serializer>::Ok, <S as Serializer>::Error>
-        where
-            S: Serializer,
-        {
-            let mut s = ser.serialize_struct("Rational", 1)?;
-            s.serialize_field("numer", &self.numer)?;
-            s.end()
-        }
-    }
-    #[cfg(feature = "serde")]
-    use serde::{Deserialize, Deserializer};
-    #[cfg(feature = "serde")]
-    impl<'de, const DENOM: i64> Deserialize<'de> for Rational<DENOM> {
-        fn deserialize<D>(de: D) -> core::result::Result<Self, <D as Deserializer<'de>>::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            let numer = de.deserialize_struct("Rational", &["numer"], NumerVisit)?;
-            Ok(Self { numer })
-        }
-    }
-    #[cfg(feature = "serde")]
-    use serde::de::Visitor;
-    #[cfg(feature = "serde")]
-    use serde::export::Formatter;
-    #[cfg(feature = "serde")]
-    struct NumerVisit;
-    #[cfg(feature = "serde")]
-    impl<'de> Visitor<'de> for NumerVisit {
-        type Value = i64;
-        fn expecting(&self, f: &mut Formatter<'_>) -> core::result::Result<(), core::fmt::Error> {
-            write!(f, "expecting a numerator (i64 value) for a rational number")
-        }
-        fn visit_i64<E>(self, n: i64) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error,
-        {
-            Ok(n)
-        }
-    }
 }
 #[test]
 fn converts() {
@@ -283,4 +238,14 @@ fn displaytest() {
     extern crate std;
     use std::println;
     println!("{:#?}", tenrat);
+}
+
+#[cfg(feature = "serde1")]
+#[test]
+fn serde_test() {
+    let r: TenRat = 3.0.into();
+    use bincode;
+    let s = bincode::serialize(&r).unwrap();
+    let d = bincode::deserialize(&s).unwrap();
+    assert_eq!(r, d);
 }

@@ -55,9 +55,10 @@ pub fn wrap(v: isize, w: usize) -> usize {
 }
 
 use bigmatrix::BigMatrix;
-use serde_derive::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Serialize};
+use serde_derive as sd;
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(sd::Serialize, sd::Deserialize, Clone, Debug)]
 pub struct SerializeApp<B: Brain> {
     genes: Vec<Genes<B>>,
     status: Vec<Status>,
@@ -70,27 +71,52 @@ pub struct SerializeApp<B: Brain> {
     last_report: f64,
 }
 
-impl<B: Brain + Send + Sync> SerializeApp<B> {
-    fn unpack(self) -> App<B> {
-        App {
+///safety: only call this if T and Atomic<T> have the same in-memory representation
+unsafe fn food_s_to_a<T: Sized>(g: &OldFoodGrid<T>) -> FoodGrid<T> {
+    std::mem::transmute_copy(g)
+}
+
+///safety: only call this if T and Atomic<T> have the same in-memory representation
+///the &mut is to force the atomic to not be in other threads
+unsafe fn food_a_to_s<T: Default>(g: &mut FoodGrid<T>) -> OldFoodGrid<T> {
+    std::mem::transmute_copy(g)
+}
+
+impl<B: Brain + Send + Sync + Serialize + DeserializeOwned> SerializeApp<B> {
+    fn unpack(self, report_file: Option<std::fs::File>) -> App<B> {
+        // safety: no, i can not guarantee that T and Atomic<T> have the same representation,
+        // especially on 32-bit platforms. arrays are so annoying to deal with that i am ignoring
+        // that though.
+        let vegtables = unsafe { food_s_to_a(&self.vegtables) };
+        let meat = unsafe { food_s_to_a(&self.meat) };
+        let mut a = App {
             genes: self.genes,
             status: self.status,
             time: self.time,
             rng: self.rng,
             last_report: self.last_report,
-            //todo: move tree building and grid (re-) construction into methods
-            ..todo!()
-        }
+            vegtables,
+            meat,
+            tree: SpatVec::new_from(Vec::new()),
+            report_file,
+        };
+        a.update_tree();
+        a
     }
-    fn pack(other: App<B>) -> Self {
+    fn pack(other: &mut App<B>) -> Self {
+        // safety: no, i can not guarantee that T and Atomic<T> have the same representation,
+        // especially on 32-bit platforms. arrays are so annoying to deal with that i am ignoring
+        // that though.
+        let vegtables = unsafe { food_a_to_s(&mut other.vegtables) };
+        let meat = unsafe { food_a_to_s(&mut other.meat) };
         Self {
-            genes: other.genes,
-            status: other.status,
+            genes: other.genes.clone(),
+            status: other.status.clone(),
             time: other.time,
-            rng: other.rng,
+            rng: other.rng.clone(),
             last_report: other.last_report,
-            // yeah the grid transmutes need to go into their own functions
-            ..todo!()
+            vegtables,
+            meat,
         }
     }
 }
@@ -108,6 +134,17 @@ pub struct App<B: Brain + Send + Sync> {
     rng: DetRng,
     last_report: f64,
     report_file: Option<std::fs::File>,
+}
+impl<B: Brain + Send + Sync + Serialize + DeserializeOwned> App<B> {
+    pub fn new_from<R: std::io::Read>(r: R, report_path: Option<&str>) -> bincode::Result<Self> {
+        let report_file = report_path.map(std::fs::File::create).map(Result::unwrap);
+        let sa: SerializeApp<_> = bincode::deserialize_from(r)?;
+        let s = sa.unpack(report_file);
+        Ok(s)
+    }
+    pub fn write_into<W: std::io::Write>(&mut self, w: W) -> bincode::Result<()> {
+        bincode::serialize_into(w, &SerializeApp::pack(self))
+    }
 }
 
 impl<B: Brain + Send + Sync> App<B> {
@@ -328,8 +365,19 @@ impl<B: Brain + Send + Sync> App<B> {
         iter.for_each(|mut blip| blip.motion(args.dt));
 
         // update tree
-        // todo: instead of re-building on each iteration i should update it
-        // the blips have stable indices specifically for this usecase
+        self.update_tree();
+
+        // just to make sure ppl with old rust versions can't run this, fuck debian in particular
+        if self.time - self.last_report > std::f64::consts::TAU * 100. {
+            self.write_report();
+            self.last_report = self.time;
+            // write to stdout more rarely
+            if self.time as u64 % ((std::f64::consts::TAU * 1000.) as u64) == 0 {
+                self.report()
+            }
+        }
+    }
+    fn update_tree(&mut self) {
         let tree = self
             .status
             .iter()
@@ -341,16 +389,6 @@ impl<B: Brain + Send + Sync> App<B> {
             .map(|(index, s)| (s.pos, index))
             .collect();
         self.tree = SpatVec::new_from(tree);
-
-        // just to make sure ppl with old rust versions can't run this, fuck debian in particular
-        if self.time - self.last_report > std::f64::consts::TAU * 100. {
-            self.write_report();
-            self.last_report = self.time;
-            // write to stdout more rarely
-            if self.time as u64 % ((std::f64::consts::TAU * 1000.) as u64) == 0 {
-                self.report()
-            }
-        }
     }
 }
 #[derive(Debug, PartialEq)]
@@ -595,6 +633,39 @@ fn matrix_ser_de() {
     let t = t;
     use bincode;
     let ser: Vec<u8> = bincode::serialize(&t).unwrap();
-    let de = bincode::deserialize(&ser[..]).unwrap();
+    let de = bincode::deserialize(&ser).unwrap();
     assert_eq!(t, de);
+}
+
+#[test]
+fn ser_de_determinism() {
+    use crate::brains::SimpleBrain;
+    let mut app1 = App::<SimpleBrain>::new(1234, None);
+    let mut app2 = App::<SimpleBrain>::new(1234, None);
+
+    for i in 0..20_000 {
+        if i % 100 == 0 {
+            println!("determinism iteration {}", i);
+        }
+        app1.update(&UpdateArgs { dt: 0.02 });
+        app2.update(&UpdateArgs { dt: 0.02 });
+        if app1 != app2 {
+            use std::fs::File;
+            use std::io::Write;
+            let mut f1 = File::create("dump_app1").unwrap();
+            let mut f2 = File::create("dump_app2").unwrap();
+
+            let s1 = format!("{:#?}", app1);
+            let s2 = format!("{:#?}", app2);
+
+            f1.write_all(s1.as_bytes()).unwrap();
+            f2.write_all(s2.as_bytes()).unwrap();
+        }
+        assert_eq!(app1, app2);
+        if i % 1000 == 0 {
+            let a2s = bincode::serialize(&SerializeApp::pack(app2)).unwrap();
+            let a2d: SerializeApp<_> = bincode::deserialize(&a2s).unwrap();
+            app2 = a2d.unpack(None);
+        }
+    }
 }

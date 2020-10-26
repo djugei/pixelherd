@@ -8,9 +8,12 @@ edition = "2018"
 
 [dependencies]
 num-traits = { version = "*", default-features = false }
-serde = { version = "*" , optional = true}
+serde = { version = "*" , optional = true, features = ["derive"]}
+
+[dev-dependencies]
+bincode = { version = "*" }
 
 [features]
-default = ["nightly", "serde"]
+default = ["nightly", "serde1"]
 nightly = []
 serde1 = ["serde"]

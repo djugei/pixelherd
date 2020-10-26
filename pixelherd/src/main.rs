@@ -62,7 +62,14 @@ fn main() {
         .build()
         .unwrap();
 
-    let mut app = App::<brains::SimpleBrain>::new(1234, "report".into());
+    let oa = std::fs::File::open("savestate")
+        .ok()
+        .map(|f| App::new_from(f, "report".into()).ok())
+        .flatten();
+    if oa.is_some() {
+        println!("loading from savestate")
+    };
+    let mut app: App<brains::SimpleBrain> = oa.unwrap_or_else(|| App::new(1234, "report".into()));
     let mut render = Renderer {
         gl: GlGraphics::new(opengl),
         mousepos: [0.; 2],
@@ -87,7 +94,7 @@ fn main() {
         .select_best_match(&fontfam, &fontprops)
         .unwrap();
     // fixme: this will (probably soft-) fail on font collections, as i am ignoring the index.
-    // shouldbe building a rusttype::FontCollection and then select by index.
+    // should be building a rusttype::FontCollection and then select by index.
     let fontdata: Result<std::path::PathBuf, Vec<u8>> = match handle {
         Handle::Path { path, .. } => Ok(path),
         Handle::Memory { bytes, .. } => Err((*bytes).clone()),
@@ -122,8 +129,10 @@ fn main() {
                 }
                 input::Button::Keyboard(input::keyboard::Key::S) => {
                     if args.state == input::ButtonState::Release {
-                        println!("spawning new blip currently disabled");
-                        //fixme: app.blips.push(Blip::new(&mut rng));
+                        println!("saving state");
+                        let mut f = std::fs::File::create("savestate").unwrap();
+                        app.write_into(&mut f).unwrap();
+                        println!("saved state");
                     }
                 }
                 input::Button::Keyboard(input::keyboard::Key::R) => {
@@ -195,6 +204,10 @@ fn main() {
             }
         }
     }
+    println!("exiting gracefully, saving state");
+    let mut f = std::fs::File::create("savestate").unwrap();
+    app.write_into(&mut f).unwrap();
+    println!("goodbye!");
 }
 
 #[test]

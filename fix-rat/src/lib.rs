@@ -261,12 +261,12 @@ fn converts() {
 
 #[test]
 fn precision() {
+    type R = Rational<{ i64::MAX / (1 << 10) }>;
     extern crate std;
     use std::dbg;
     let f = 640.132143234189097_f64;
-    let r: Rational<{ i64::MAX / (1 << 10) }> = nightly::Rational::aprox_float(f).unwrap();
-    let mut r2 = r.clone();
-    r2 = nightly::Rational::aprox_float_fast(f).unwrap();
+    let r: R = nightly::Rational::aprox_float(f).unwrap();
+    let r2: R = nightly::Rational::aprox_float_fast(f).unwrap();
     let rf = r.to_f64();
     // ok so turns out that the fast conversion is actually not worse.
     // i guess multiplying/diving by 2potn is kinda what floats are good at

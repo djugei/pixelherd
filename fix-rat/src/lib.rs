@@ -77,6 +77,13 @@
 //!     `9 - 1 =  8,  8 + 2 = 10`
 //! 9 != 10.
 //!
+//! Moving through different scales,
+//!     mainly by multiplying/dividing
+//! costs more precision than you might be used from floating point numbers.
+//! For example diving by 2 costs no precision in floating point numbers,
+//!     it simply decreases the exponent by one.
+//! In rationals it costs one bit of precsion.
+//!
 //! # Implementation
 //! This is a super simple wrapper around an integer,
 //! basically all operations are passed straight through.
@@ -92,6 +99,12 @@
 //! currently being generic over intergers is a bit.. annoying. being generic over intergers while
 //! also taking a value of that type as a const generic is.. currently not typechecking. so
 //! supporting usecase 4 would need some macroing (i&u 8,16,32,64). For now its just always i64.
+//!
+//! i should probably provide some atomic operations for comfort, at least add&sub.
+//! (even though they are simply identical to just adding/subbing on the converted atomic.
+//!
+//! currently there is no rat-rat interaction with different denominatiors. that could be
+//! improved, but might need to wait for better const generics.
 //!
 //! # nightly
 //! This crate very much inherently relies on const generics (min_const_generics).

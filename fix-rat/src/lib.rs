@@ -117,8 +117,54 @@ mod nightly {
             Self { numer: i64::MIN }
         }
 
-        /// don't use this in parallel code if other parallel code is also subtracting, otherwise
-        /// you loose determinism.
+        pub fn checked_add(self, other: Self) -> Option<Self> {
+            Self {
+                numer: self.numer.checked_add(other.numer)?,
+            }
+            .into()
+        }
+        pub fn checked_mul(self, other: Self) -> Option<Self> {
+            Self {
+                numer: self.numer.checked_mul(other.numer)?,
+            }
+            .into()
+        }
+        pub fn checked_sub(self, other: Self) -> Option<Self> {
+            Self {
+                numer: self.numer.checked_sub(other.numer)?,
+            }
+            .into()
+        }
+        pub fn checked_div(self, other: Self) -> Option<Self> {
+            Self {
+                numer: self.numer.checked_div(other.numer)?,
+            }
+            .into()
+        }
+
+        pub fn wrapping_add(self, other: Self) -> Self {
+            Self {
+                numer: self.numer.wrapping_add(other.numer),
+            }
+        }
+        pub fn wrapping_mul(self, other: Self) -> Self {
+            Self {
+                numer: self.numer.wrapping_mul(other.numer),
+            }
+        }
+        pub fn wrapping_sub(self, other: Self) -> Self {
+            Self {
+                numer: self.numer.wrapping_sub(other.numer),
+            }
+        }
+        pub fn wrapping_div(self, other: Self) -> Self {
+            Self {
+                numer: self.numer.wrapping_div(other.numer),
+            }
+        }
+
+        /// Don't use this in parallel code if other parallel code is also subtracting,
+        /// otherwise you loose determinism.
         ///
         /// ```
         /// use fix_rat::Rational;
@@ -131,11 +177,15 @@ mod nightly {
                 numer: self.numer.saturating_add(other.numer),
             }
         }
-        pub fn checked_add(self, other: Self) -> Option<Self> {
+        pub fn saturating_mul(self, other: Self) -> Self {
             Self {
-                numer: self.numer.checked_add(other.numer)?,
+                numer: self.numer.saturating_mul(other.numer),
             }
-            .into()
+        }
+        pub fn saturating_sub(self, other: Self) -> Self {
+            Self {
+                numer: self.numer.saturating_sub(other.numer),
+            }
         }
     }
 

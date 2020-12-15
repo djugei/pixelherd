@@ -1,5 +1,104 @@
+//! fix-rat is a rational number with the denominator chosen at compile time.
+//!
+//! # Intended Use-Cases
+//!
+//! It is meant to replace regular floating point numbers
+//!     (f64/f32)
+//! in the following cases:
+//!
+//! 1. Requiring reliable precision,
+//!     for example for handling money.
+//! If you have a requirement like
+//!     "x decimal/binary places after the dot"
+//! then this crate might be for you.
+//!
+//! 2. Requiring "deterministic"
+//!     (actually associative)
+//! rounding behaviour for multithreading.
+//! If you want to apply updates to a value and
+//! the result should be the same no matter in what order the updates were applied then
+//! this crate might be for you.
+//!
+//! 3. Better precision if plausible value range is known.
+//! Floating point numbers are multi-scalar,
+//!     they can represent extremely small and extremely big numbers.
+//! If your calculations stay within a known interval,
+//!     for example [-1, 1],
+//! fixed-rat might be able to provide better precision and performance.
+//!
+//! 4. todo: low precision and high performance requirements:
+//! Floating point numbers only come in two variants,
+//! f32 and f64, using 32 and 64 bits respectively.
+//! If you do not require that much precision,
+//!     if 16 or even 8 bits are enough for your usecase
+//! you can store more numbers in the same space.
+//!     Due to lower memory bandwidth and availability of SIMD-instructions
+//! this can lead to close to a 2x or 4x respectively speed up of affected pieces of code.
+//!
+//! # Gotchas (tips&tricks)
+//! For reliable precision:
+//!     remember that you are still loosing precision on every operation,
+//!     there is no way around this except bigints.
+//!
+//! Unlike floats Rationals have a valid range and it is easy to over/underflow it.
+//! It might be advisable to choose a slightly larger representable range.
+//!
+//! Using rationals does not automatically make multithreaded code deterministic.
+//! The determinism loss with floating point numbers happens when
+//!     a calculation changes the scale (exponent) of the number.
+//! Rationals are always on the same scale but you now have to deal with range overflows.
+//!
+//! The easiest behaviour is to use wrapping_op.
+//! It always succeeds and can be executed in any order with any values without loosing determinism.
+//! Ofc this might not be sensible behaviour for your use-case.
+//!
+//! The second-easiest is to use is checked_op with unwrap.
+//! This is probably fine if you have a base value that is only changed in small increments.
+//! Choose a slightly bigger representable range and do the overflow handling in synchronous code,
+//!     for example by clamping to the valid range
+//!         (which is smaller than the representable range).
+//!
+//! You can not,
+//!     at least not naively,
+//! actually check the checked_op,
+//!     as that would generally lead to behaviour differences on different execution orders.
+//! Correctly doing this is the hardest option,
+//!     but might be required for correctness.
+//!
+//! Using saturating_op can be perfectly valid,
+//!     but you need to be careful that the value can only be pushed into one direction
+//!         (either towards max or towards min).
+//! Otherwise different execution orders lead to different results.
+//! Reminder that adding negative values is also subtraction!
+//!
+//! Assuming [-10,10]:
+//!     `9 + 2 = 10, 10 - 1 =  9`
+//! but
+//!     `9 - 1 =  8,  8 + 2 = 10`
+//! 9 != 10.
+//!
+//! # Implementation
+//! This is a super simple wrapper around an integer,
+//! basically all operations are passed straight through.
+//! So an addition of two rationals is really just a simple integer addition.
+//!
+//! Converting an integer/float to a rational simply multiplies it by the chosen DENOM,
+//! rational to integer/float divides.
+//!
+//! The code is super simple.
+//! The main value of this crate is the tips and tricks and ease of use.
+//!
+//! # todos/notes
+//! currently being generic over intergers is a bit.. annoying. being generic over intergers while
+//! also taking a value of that type as a const generic is.. currently not typechecking. so
+//! supporting usecase 4 would need some macroing (i&u 8,16,32,64). For now its just always i64.
+//!
+//! # nightly
+//! This crate very much inherently relies on const generics (min_const_generics).
+//!
+
 #![no_std]
-#![feature(const_generics)]
+#![feature(min_const_generics)]
 #![cfg(feature = "nightly")]
 #![allow(incomplete_features)]
 #![cfg(feature = "nightly")]
@@ -18,18 +117,27 @@ pub type HundRat = Rational<{ i64::MAX / 128 }>;
 mod nightly {
     #[cfg(feature = "serde1")]
     use serde as sd;
-    /// a ratonal number with a fixed denom, therefore
-    /// sizeof\<Rational> == sizeof\<i64>. plus operations have more intuitive valid ranges
+    /// A ratonal number with a fixed denominator,
+    /// therefore `sizeof<Rational> == sizeof<i64>`.
     ///
+    /// Plus operations have more intuitive valid ranges
     ///
-    /// if you want to represent numbers in range -2.exp(x) to 2.exp(x)
-    /// choose denom as {i64::MAX / (1 << x)}
+    /// If you want to represent numbers in range `-x` to `x`
+    /// choose DENOM as `i64::MAX / x`.
     ///
-    /// Rational then subdivides the whole range into i64::MAX equally-sized parts
-    /// smaller operations are lost, going outside the range overflows.
+    /// [Rational] then subdivides the whole range into i64::MAX equally-sized parts.
+    /// Smaller operations are lost,
+    /// going outside the range overflows.
     ///
-    /// denom needs to be positive or you will enter the bizarro universe
-    /// i would strongly recommend to choose denom as a 2.exp(x)
+    /// DENOM needs to be positive or you will enter the bizarro universe.
+    ///
+    /// I would strongly recommend to choose DENOM as `1 << x` for x in 0..63.
+    ///
+    /// The regular operations (+,-, *, /) behave just like on a regular integer,
+    ///     panic on overflow in debug mode,
+    ///     wrapping in release mode.
+    /// Use the wrapping_op, checked_op or saturating_op methods
+    ///     to explicitly chose a behaviour.
     #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
     #[repr(transparent)]
     #[cfg_attr(feature = "serde1", derive(sd::Serialize, sd::Deserialize))]
@@ -37,12 +145,32 @@ mod nightly {
         numer: i64,
     }
     impl<const DENOM: i64> Rational<DENOM> {
+        /// Returns the underlying integer type,
+        /// for example for storing in an atomic number.
+        ///
+        /// This should compile to a no-op.
+        pub fn to_storage(self) -> i64 {
+            self.numer
+        }
+        /// Builds from the underlying integer type,
+        /// for example after retrieving from an atomic number.
+        ///
+        /// This should compile to a no-op.
+        ///
+        /// Use [from_int](Self::from_int) if you have an integer that you want to convert to a rational.
+        pub fn from_storage(storage: i64) -> Self {
+            Self { numer: storage }
+        }
+
+        /// Converts an integer to a Rational.
         pub fn from_int(i: i64) -> Self {
             Self { numer: i * DENOM }
         }
-        /// since rationals can not represent inf, nan and other fuckery this returns none if the
-        /// input is wrong
-        /// really not very precise
+        /// Since rational numbers can not represent inf, nan and other fuckery,
+        /// this returns None if the input is wrong.
+        ///
+        /// This will loose precision,
+        /// try to only convert at the start and end of your calculation.
         pub fn aprox_float_fast(f: f64) -> Option<Self> {
             use core::num::FpCategory as Cat;
             if let Cat::Subnormal | Cat::Normal | Cat::Zero = f.classify() {
@@ -59,12 +187,9 @@ mod nightly {
             })
         }
 
-        /// kinda assumes that denom is 2.exp(x) otherwise (more) precision is lost
-        /// otherwise the conversion is actually not very lossy at all, except for very small
-        /// values (that are not representable in that precision)
-        ///
-        /// try to input values that are actually inside the valid range, otherwise you will get
-        /// None back
+        /// Assumes denom to be a power of two.
+        /// kind of experimental.
+        #[doc(hidden)]
         pub fn aprox_float(f: f64) -> Option<Self> {
             use core::num::FpCategory as Cat;
             match f.classify() {
@@ -101,18 +226,27 @@ mod nightly {
             // hm, or just allow 1<<x as denom, sounds senible too
             Self { numer }.into()
         }
-        /// rounding errors
+
+        /// This will loose precision,
+        /// try to only convert at the start and end of your calculation.
         pub fn to_f64(self) -> f64 {
             //todo: can i do a *thing* with this to get some more precision?
             //(i.e. bitbang the float?)
             self.numer as f64 / DENOM as f64
         }
+
         pub fn clamp(self, low: Self, high: Self) -> Self {
             self.max(low).min(high)
         }
+        /// The maximum representable number.
+        ///
+        /// Note that unlike floats rationals do not have pos/neg inf.
         pub const fn max() -> Self {
             Self { numer: i64::MAX }
         }
+        /// The minimum representable number.
+        ///
+        /// Note that unlike floats rationals do not have pos/neg inf.
         pub const fn min() -> Self {
             Self { numer: i64::MIN }
         }

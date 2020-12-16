@@ -1,5 +1,17 @@
 //! fix-rat is a rational number with the denominator chosen at compile time.
 //!
+//! It has a fixed valid range.
+//!
+//!     # use fix_rat::Rational;
+//!     type R = Rational<{ i64::MAX / 64}>;
+//!
+//!     let a: R = 60.into();
+//!     let b: R = 5.0.into();
+//!     let c = a.wrapping_add(b);
+//!
+//!     let c = c.to_i64();
+//!     assert_eq!(c, -63);
+//!
 //! # Intended Use-Cases
 //!
 //! It is meant to replace regular floating point numbers
@@ -41,7 +53,7 @@
 //!     there is no way around this except bigints.
 //!
 //! Unlike floats Rationals have a valid range and it is easy to over/underflow it.
-//! It might be advisable to choose a slightly larger representable range.
+//! It might be advisable to choose the representable range slightly larger.
 //!
 //! Using rationals does not automatically make multithreaded code deterministic.
 //! The determinism loss with floating point numbers happens when
@@ -50,7 +62,7 @@
 //!
 //! The easiest behaviour is to use wrapping_op.
 //! It always succeeds and can be executed in any order with any values without loosing determinism.
-//! Ofc this might not be sensible behaviour for your use-case.
+//! This might not be sensible behaviour for your use-case though.
 //!
 //! The second-easiest is to use is checked_op with unwrap.
 //! This is probably fine if you have a base value that is only changed in small increments.
@@ -83,6 +95,8 @@
 //! For example diving by 2 costs no precision in floating point numbers,
 //!     it simply decreases the exponent by one.
 //! In rationals it costs one bit of precsion.
+//! Remember that rationals start out with 63 bits though,
+//! while f64 only has 53.
 //!
 //! # Implementation
 //! This is a super simple wrapper around an integer,
@@ -92,8 +106,8 @@
 //! Converting an integer/float to a rational simply multiplies it by the chosen DENOM,
 //! rational to integer/float divides.
 //!
-//! The code is super simple.
-//! The main value of this crate is the tips and tricks and ease of use.
+//! The code is very simple.
+//! The main value of this crate is the tips&tricks and ease of use.
 //!
 //! # todos/notes
 //! currently being generic over intergers is a bit.. annoying. being generic over intergers while
@@ -131,7 +145,7 @@ mod nightly {
     #[cfg(feature = "serde1")]
     use serde as sd;
     /// A ratonal number with a fixed denominator,
-    /// therefore `sizeof<Rational> == sizeof<i64>`.
+    /// therefore `size_of<Rational>() == size_of<i64>()`.
     ///
     /// Plus operations have more intuitive valid ranges
     ///
@@ -246,6 +260,11 @@ mod nightly {
             //todo: can i do a *thing* with this to get some more precision?
             //(i.e. bitbang the float?)
             self.numer as f64 / DENOM as f64
+        }
+
+        /// this will integer-round, potentially loosing a lot of precision.
+        pub fn to_i64(self) -> i64 {
+            self.numer / DENOM
         }
 
         pub fn clamp(self, low: Self, high: Self) -> Self {

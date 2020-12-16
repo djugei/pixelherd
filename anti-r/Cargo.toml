@@ -8,7 +8,16 @@ edition = "2018"
 
 [dependencies]
 
+[dev-dependencies]
+criterion = "0.3"
+rstar = "*"
+rand = "*"
+
+[[bench]]
+name = "r_vs_no"
+harness = false
 
 [features]
 default = ["alloc"]
 alloc = []
+

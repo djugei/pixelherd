@@ -25,8 +25,8 @@
 //! then this crate might be for you.
 //!
 //! 2. Requiring "deterministic"
-//!     (actually associative)
-//! rounding behaviour for multithreading.
+//!     (actually commutative and associative)
+//! behaviour for multithreading.
 //! If you want to apply updates to a value and
 //! the result should be the same no matter in what order the updates were applied then
 //! this crate might be for you.
@@ -110,19 +110,19 @@
 //! The main value of this crate is the tips&tricks and ease of use.
 //!
 //! # todos/notes
-//! currently being generic over intergers is a bit.. annoying. being generic over intergers while
+//! Currently being generic over intergers is a bit.. annoying. Being generic over intergers while
 //! also taking a value of that type as a const generic is.. currently not typechecking. so
 //! supporting usecase 4 would need some macroing (i&u 8,16,32,64). For now its just always i64.
 //!
-//! i should probably provide some atomic operations for comfort, at least add&sub.
-//! (even though they are simply identical to just adding/subbing on the converted atomic.
+//! I should probably provide some atomic operations for comfort, at least add&sub.
+//! Even though they are simply identical to just adding/subbing on the converted atomic.
 //!
-//! currently there is no rat-rat interaction with different denominatiors. that could be
-//! improved, but might need to wait for better const generics.
+//! Currently there is no rat-rat interaction with different denominatiors.
+//! That could be improved,
+//! but might need to wait for better const generics.
 //!
 //! # nightly
 //! This crate very much inherently relies on const generics (min_const_generics).
-//!
 
 #![no_std]
 #![feature(min_const_generics)]
@@ -134,11 +134,11 @@
 pub use nightly::Rational;
 
 #[cfg(feature = "nightly")]
-///can store -10 to 10 with a bit of wiggle room
+/// Can store -10 to 10 with a bit of wiggle room.
 pub type TenRat = Rational<{ i64::MAX / 16 }>;
 
 #[cfg(feature = "nightly")]
-///can store -100 to 100 with a bit of wiggle room
+/// Can store -100 to 100 with a bit of wiggle room.
 pub type HundRat = Rational<{ i64::MAX / 128 }>;
 
 mod nightly {

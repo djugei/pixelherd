@@ -7,13 +7,14 @@
 //! They only differ by constant factors,
 //! either x or y in O(log_b(n+x)+y)
 //! and the base of the logarithm,
-//! which is 2 for Anti-R and 3-6 (configurable) for R-Tree.
+//! which is 2 for Anti-R and configurable for R-Tree, generally 3-6.
 //!
 //! Anti-R is always faster at updating all elements and bulk-loading by a constant factor,
 //! therefore it is more noticeable for small n.
 //!
 //! Full updates and bulk-loads are equivalent in speed for Anti-R.
-//! R-Trees are much slower to update.
+//! For R-Trees full updates are never worth it,
+//! a full reconstruction is simply faster.
 //!
 //! Zero to a bit more than 100_000 elements are faster to query for Anti-R.
 //! R-Trees start winning at above 200_000 elements.
@@ -174,14 +175,17 @@ mod vec {
     where
         K: PartialOrd,
     {
+	/// Turns a Vec into a SpatVec by sorting its elements.
         pub fn new_from(mut v: Vec<(K, V)>) -> Self {
             SpatSlice::new(&mut v);
             Self::new_from_unchecked(v)
         }
+	/// Turns a Vec into a SpatVec.
+	/// Caller guarantees elements to be sorted by K.
         pub fn new_from_unchecked(v: Vec<(K, V)>) -> Self {
             Self { inner: v }
         }
-        pub fn to_inner(self) -> Vec<(K, V)> {
+        pub fn into_inner(self) -> Vec<(K, V)> {
             self.inner
         }
         /// Applies f and then re-sorts

@@ -3,6 +3,7 @@ name = "fix-rat"
 version = "0.1.0"
 authors = ["djugei <ddjugei@gmail.com>"]
 edition = "2018"
+description = "A rational number type with fixed denominator"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

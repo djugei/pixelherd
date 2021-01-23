@@ -9,8 +9,8 @@ pub fn gen_points(num: usize) -> Vec<([f64; 2], usize)> {
     let mut v = Vec::with_capacity(num);
     let mut rng = rand::thread_rng();
     for i in 0..num {
-        let x = rng.gen_range(-1000., 1000.);
-        let y = rng.gen_range(-1000., 1000.);
+        let x = rng.gen_range(-1000.0..1000.);
+        let y = rng.gen_range(-1000.0..1000.);
         v.push(([x, y], i));
     }
     v
@@ -25,17 +25,17 @@ pub fn build_rtree(data: Vec<Loc>) -> RTree {
 }
 
 pub fn gen_query<R: Rng>(mut rng: R) -> ([f64; 2], [f64; 2]) {
-    let center_x = rng.gen_range(-1000., 1000.);
-    let center_y = rng.gen_range(-1000., 1000.);
-    let offset = rng.gen_range(0., 10.);
+    let center_x = rng.gen_range(-1000.0..1000.);
+    let center_y = rng.gen_range(-1000.0..1000.);
+    let offset = rng.gen_range(0.0..10.);
     let lu = [center_x - offset, center_y - offset];
     let rd = [center_x + offset, center_y + offset];
     (lu, rd)
 }
 
 pub fn mutate<R: Rng>(mut r: R, p: [f64; 2]) -> [f64; 2] {
-    let off_x = r.gen_range(-MOVE, MOVE);
-    let off_y = r.gen_range(-MOVE, MOVE);
+    let off_x = r.gen_range(-MOVE..MOVE);
+    let off_y = r.gen_range(-MOVE..MOVE);
     [p[0] + off_x, p[1] + off_y]
 }
 

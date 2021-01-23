@@ -202,8 +202,8 @@ impl<B: Brain + Send + Sync> App<B> {
         for w in 0..config::FOOD_WIDTH {
             for h in 0..config::FOOD_HEIGHT {
                 //fixme: this should be an exponential distribution instead
-                if app.rng.gen_range(0, 3) == 1 {
-                    *app.vegtables[w][h].get_mut() = app.rng.gen_range(0., 10.).into();
+                if app.rng.gen_range(0..3) == 1 {
+                    *app.vegtables[w][h].get_mut() = app.rng.gen_range(0.0..10.).into();
                 }
             }
         }
@@ -345,12 +345,12 @@ impl<B: Brain + Send + Sync> App<B> {
         let mut chance = (config::REPLENISH * args.dt) / 4.;
         while chance > 0. {
             if self.rng.gen_bool(chance.min(1.)) {
-                let w: usize = self.rng.gen_range(0, config::FOOD_WIDTH);
-                let h: usize = self.rng.gen_range(0, config::FOOD_HEIGHT);
+                let w: usize = self.rng.gen_range(0..config::FOOD_WIDTH);
+                let h: usize = self.rng.gen_range(0..config::FOOD_HEIGHT);
                 let grid = self.vegtables[w][h].get_mut();
                 // expected: 4, chances is divided by 4
                 // trying to get a less uniform food distribution
-                let f: TenRat = self.rng.gen_range(3., 5.).into();
+                let f: TenRat = self.rng.gen_range(3.0..5.).into();
                 *grid = grid.saturating_add(f);
             }
             chance -= 1.;
@@ -572,11 +572,11 @@ fn float_assoc() {
     let tests = 1_000;
 
     for _i in 0..tests {
-        let a: f64 = rng.gen_range(-10., 10.);
+        let a: f64 = rng.gen_range(-10.0..10.);
         for _j in 0..tests {
-            let b: f64 = rng.gen_range(-10., 10.);
+            let b: f64 = rng.gen_range(-10.0..10.);
             for _k in 0..tests {
-                let c: f64 = rng.gen_range(-10., 10.);
+                let c: f64 = rng.gen_range(-10.0..10.);
                 assert_eq!(a + b + c, a + c + b);
                 assert_eq!(a - b - c, a - c - b);
                 assert_eq!(a * b * c, a * c * b);
@@ -594,11 +594,11 @@ fn float_assoc_trunc() {
     let tests = 1_000;
 
     for _i in 0..tests {
-        let a: f32 = rng.gen_range(-10., 10.);
+        let a: f32 = rng.gen_range(-10.0..10.);
         for _j in 0..tests {
-            let b: f32 = rng.gen_range(-10., 10.);
+            let b: f32 = rng.gen_range(-10.0..10.);
             for _k in 0..tests {
-                let c: f32 = rng.gen_range(-10., 10.);
+                let c: f32 = rng.gen_range(-10.0..10.);
                 let a = a as f64;
                 let b = b as f64;
                 let c = c as f64;

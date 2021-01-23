@@ -1,7 +1,7 @@
 //todo: extract a lot of numbers into config.
 //todo: make config dynamic (read at start of runtime)
-pub const FOOD_WIDTH: usize = 50;
-pub const FOOD_HEIGHT: usize = 50;
+pub const FOOD_WIDTH: usize = 180;
+pub const FOOD_HEIGHT: usize = 180;
 
 pub const INITIAL_CELLS: usize = 100;
 pub const REPLACEMENT: usize = 5;

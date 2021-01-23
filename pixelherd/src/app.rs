@@ -3,8 +3,8 @@ use crate::config;
 use crate::blip::{Blip, Genes, Status};
 use crate::brains::Brain;
 use crate::select::Selection;
-use anti_r::vec::SpatVec;
 use anti_r::SpatSlice;
+use anti_r::SpatVec;
 use atomic::Atomic;
 use fix_rat::{HundRat, TenRat};
 use piston::input::UpdateArgs;
@@ -126,7 +126,6 @@ pub struct App<B: Brain + Send + Sync> {
     genes: Vec<Genes<B>>,
     status: Vec<Status>,
     vegtables: VegGrid,
-    // todo: consider giving meat a higher possible range (high risk/high reward)
     meat: MeatGrid,
     tree: Tree,
     // todo: complete switch to a tick based system (i.e. usize counter with global float stepsize)
@@ -254,7 +253,7 @@ impl<B: Brain + Send + Sync> App<B> {
                         // datatype is valid from -128 to 128
                         // but 0-10 is the only sensible value range for application domain
                         // this is important for determinism as saturations/wraparounds break determinism
-                        // (well except we only do subtraction, so saturating would be fine)
+                        // meat actually gets subtracted (eaten) and added to (deaths)
                         *w = (*r.get_mut()).clamp((-1).into(), 70.into());
                     }
                 })
@@ -292,11 +291,13 @@ impl<B: Brain + Send + Sync> App<B> {
         spawns.sort_unstable_by_key(|(i, _)| *i);
 
         for (_i, (s, g)) in spawns {
-            // oh fuck the indices gotta really make sure i don't fuck this up
+            // gotta make sure the blips (status) and genes indices always match up
             new.push(s);
             self.genes.push(g);
         }
 
+        // can't just do retain as i need to drop from both new and genes.
+        // notice the rev() call though so all is fine
         let deaths = new
             .iter()
             .enumerate()
@@ -306,7 +307,6 @@ impl<B: Brain + Send + Sync> App<B> {
             .collect::<Vec<_>>();
 
         for i in deaths {
-            // todo: drop some meat on death
             new.remove(i);
             self.genes.remove(i);
         }
@@ -405,7 +405,7 @@ pub struct Report {
     avg_meat: f64,
 }
 impl<B: Brain + Send + Sync> App<B> {
-    // maybe return Iterater<Item = (Selection, Status)> instead
+    // maybe return Iterator<Item = (Selection, Status)> instead
     fn gen_report(&self) -> Option<Report> {
         if self.status.len() == 0 {
             return Option::None;
@@ -531,29 +531,38 @@ where
 #[test]
 fn determinism() {
     use crate::brains::SimpleBrain;
-    let mut app1 = App::<SimpleBrain>::new(1234, None);
-    let mut app2 = App::<SimpleBrain>::new(1234, None);
+    std::thread::Builder::new()
+        // i don't quite understand why the stacks have to be so big...
+        // this is much more than 2 x App
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| {
+            let mut app1 = App::<SimpleBrain>::new(1234, None);
+            let mut app2 = App::<SimpleBrain>::new(1234, None);
 
-    for i in 0..20_000 {
-        if i % 100 == 0 {
-            println!("determinism iteration {}", i);
-        }
-        app1.update(&UpdateArgs { dt: 0.02 });
-        app2.update(&UpdateArgs { dt: 0.02 });
-        if app1 != app2 {
-            use std::fs::File;
-            use std::io::Write;
-            let mut f1 = File::create("dump_app1").unwrap();
-            let mut f2 = File::create("dump_app2").unwrap();
+            for i in 0..20_000 {
+                if i % 100 == 0 {
+                    println!("determinism iteration {}", i);
+                }
+                app1.update(&UpdateArgs { dt: 0.02 });
+                app2.update(&UpdateArgs { dt: 0.02 });
+                if app1 != app2 {
+                    use std::fs::File;
+                    use std::io::Write;
+                    let mut f1 = File::create("dump_app1").unwrap();
+                    let mut f2 = File::create("dump_app2").unwrap();
 
-            let s1 = format!("{:#?}", app1);
-            let s2 = format!("{:#?}", app2);
+                    let s1 = format!("{:#?}", app1);
+                    let s2 = format!("{:#?}", app2);
 
-            f1.write_all(s1.as_bytes()).unwrap();
-            f2.write_all(s2.as_bytes()).unwrap();
-        }
-        assert_eq!(app1, app2);
-    }
+                    f1.write_all(s1.as_bytes()).unwrap();
+                    f2.write_all(s2.as_bytes()).unwrap();
+                }
+                assert_eq!(app1, app2);
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap()
 }
 
 #[test]
@@ -616,7 +625,7 @@ fn float_assoc_trunc() {
 
 #[test]
 fn matrix_ser_de() {
-    #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Copy, Clone)]
+    #[derive(Debug, Serialize, sd::Deserialize, PartialEq, Eq, Copy, Clone)]
     struct T {
         #[serde(with = "BigMatrix")]
         e: [[usize; 33]; 44],
@@ -640,32 +649,46 @@ fn matrix_ser_de() {
 #[test]
 fn ser_de_determinism() {
     use crate::brains::SimpleBrain;
-    let mut app1 = App::<SimpleBrain>::new(1234, None);
-    let mut app2 = App::<SimpleBrain>::new(1234, None);
+    let stacksize = core::mem::size_of::<App<SimpleBrain>>();
+    let stacksize = stacksize * 5;
+    std::thread::Builder::new()
+        // in theory this should be enough,
+        // 2x app, one serialized app, one deserialized (should not exist in parallel)
+        // and a bit of extra space.
+        .stack_size(stacksize)
+        // however even 8 mb is not enough (overflows on first serialization)
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            let mut app1 = App::<SimpleBrain>::new(1234, None);
+            let mut app2 = App::<SimpleBrain>::new(1234, None);
 
-    for i in 0..20_000 {
-        if i % 100 == 0 {
-            println!("determinism iteration {}", i);
-        }
-        app1.update(&UpdateArgs { dt: 0.02 });
-        app2.update(&UpdateArgs { dt: 0.02 });
-        if app1 != app2 {
-            use std::fs::File;
-            use std::io::Write;
-            let mut f1 = File::create("dump_app1").unwrap();
-            let mut f2 = File::create("dump_app2").unwrap();
+            for i in 0..20_000 {
+                if i % 100 == 0 {
+                    println!("serde determinism iteration {}", i);
+                }
+                app1.update(&UpdateArgs { dt: 0.02 });
+                app2.update(&UpdateArgs { dt: 0.02 });
+                if app1 != app2 {
+                    use std::fs::File;
+                    use std::io::Write;
+                    let mut f1 = File::create("dump_app1").unwrap();
+                    let mut f2 = File::create("dump_app2").unwrap();
 
-            let s1 = format!("{:#?}", app1);
-            let s2 = format!("{:#?}", app2);
+                    let s1 = format!("{:#?}", app1);
+                    let s2 = format!("{:#?}", app2);
 
-            f1.write_all(s1.as_bytes()).unwrap();
-            f2.write_all(s2.as_bytes()).unwrap();
-        }
-        assert_eq!(app1, app2);
-        if i % 1000 == 0 {
-            let a2s = bincode::serialize(&SerializeApp::pack(app2)).unwrap();
-            let a2d: SerializeApp<_> = bincode::deserialize(&a2s).unwrap();
-            app2 = a2d.unpack(None);
-        }
-    }
+                    f1.write_all(s1.as_bytes()).unwrap();
+                    f2.write_all(s2.as_bytes()).unwrap();
+                }
+                assert_eq!(app1, app2);
+                if i % 1000 == 0 {
+                    let a2s = bincode::serialize(&SerializeApp::pack(&mut app2)).unwrap();
+                    let a2d: SerializeApp<_> = bincode::deserialize(&a2s).unwrap();
+                    app2 = a2d.unpack(None);
+                }
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap()
 }

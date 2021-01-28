@@ -98,7 +98,7 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
                 // don't spike others on each hit, only once
                 if self.status.spike > 0.3 {
                     // todo: rename eye_vision, spike is an "eye" pointing straight ahead.
-                    let col_angle = eye_vision(&self.status, own_base_angle, nb.pos);
+                    let col_angle = eye_vision(&self.status, own_base_angle, nb.pos).abs();
                     if col_angle < (0.05 * std::f64::consts::TAU) {
                         self.status.spike -= 0.3 * dt;
                     }
@@ -110,7 +110,7 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
                         let relspeed = vecmath::len(vecmath::add(self.status.vel, nb.vel));
                         if relspeed > 1.5 {
                             let other_base = base_angle(&nb);
-                            let col_angle = eye_vision(&nb, other_base, self.status.pos);
+                            let col_angle = eye_vision(&nb, other_base, self.status.pos).abs();
                             // in range, they have an extended spike, pointing at us, significant
                             // speed difference, they are not fully herbivore
                             if col_angle < (0.05 * std::f64::consts::TAU) {
@@ -172,6 +172,7 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
                     Some(old - consumption_r)
                 })
                 .unwrap();
+            self.status.food += consumption;
         }
 
         let meat_grid_slot = &meat[gridpos[0]][gridpos[1]];

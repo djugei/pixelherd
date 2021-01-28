@@ -407,7 +407,7 @@ pub struct Report {
 impl<B: Brain + Send + Sync> App<B> {
     // maybe return Iterator<Item = (Selection, Status)> instead
     fn gen_report(&self) -> Option<Report> {
-        if self.status.len() == 0 {
+        if self.status.is_empty() {
             return Option::None;
         }
         use Selection::*;

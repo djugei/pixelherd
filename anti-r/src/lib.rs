@@ -175,13 +175,13 @@ mod vec {
     where
         K: PartialOrd,
     {
-	/// Turns a Vec into a SpatVec by sorting its elements.
+        /// Turns a Vec into a SpatVec by sorting its elements.
         pub fn new_from(mut v: Vec<(K, V)>) -> Self {
             SpatSlice::new(&mut v);
             Self::new_from_unchecked(v)
         }
-	/// Turns a Vec into a SpatVec.
-	/// Caller guarantees elements to be sorted by K.
+        /// Turns a Vec into a SpatVec.
+        /// Caller guarantees elements to be sorted by K.
         pub fn new_from_unchecked(v: Vec<(K, V)>) -> Self {
             Self { inner: v }
         }

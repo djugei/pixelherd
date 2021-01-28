@@ -47,8 +47,8 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
         let own_base_angle = base_angle(&self.status);
         let mut eyedists = [(f64::INFINITY, 0., 0); config::b::N_EYES];
         let mut eye_angles = [0.; config::b::N_EYES];
-        for i in 0..config::b::N_EYES {
-            eye_angles[i] = eye_angle(own_base_angle, self.genes.eyes[i]);
+        for (angle, eye) in eye_angles.iter_mut().zip(&self.genes.eyes) {
+            *angle = eye_angle(own_base_angle, *eye)
         }
 
         let mut spiked = false;
@@ -157,8 +157,7 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
             let gridfactor = 0.5 + (grid_value / 10.);
             // 1..11
             let div = 1. + (outputs.speed() * 2.5);
-            let consumption = (max * gridfactor / div).min(grid_value);
-            consumption
+            (max * gridfactor / div).min(grid_value)
         };
         let consumption = (consumption_c)(grid_value) * (1. - self.genes.vore);
         if consumption > 0. && !consumption.is_nan() {
@@ -189,8 +188,7 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
             let gridfactor = 0.5 + (meat_grid_value / 10.);
             // meat consumption is not limited by speed
             let consumption = (max * gridfactor).min(meat_grid_value).min(0.1);
-            let consumption = consumption * self.genes.vore * 2.;
-            consumption
+            consumption * self.genes.vore * 2.
         };
         if meat_consumption > 0. && !meat_consumption.is_nan() {
             let consumption_r: fix_rat::HundRat = consumption.into();

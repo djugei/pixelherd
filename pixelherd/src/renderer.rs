@@ -168,17 +168,14 @@ where
 {
     let basetrans = basetrans.trans(0., size as f64);
     use graphics::Transformed;
-    text.split('\n')
-        .enumerate()
-        .map(|(idx, txt)| {
-            graphics::text(
-                colour,
-                size as u32,
-                txt,
-                glyph_cache,
-                basetrans.trans(0., (size * idx) as f64),
-                graphics,
-            )
-        })
-        .collect()
+    text.split('\n').enumerate().try_for_each(|(idx, txt)| {
+        graphics::text(
+            colour,
+            size as u32,
+            txt,
+            glyph_cache,
+            basetrans.trans(0., (size * idx) as f64),
+            graphics,
+        )
+    })
 }

@@ -246,12 +246,16 @@ impl Brain for SimpleBrain {
     fn mutate<R: Rng>(&mut self, mut rng: R, rate: f64) {
         for out in &mut self.weights {
             for inp in out.iter_mut() {
-                scaled_rand(&mut rng, rate, 0.1, 0.1, inp);
+                if rng.gen_range(0..100) < 5 {
+                    scaled_rand(&mut rng, rate, 0.2, 0.2, inp);
+                }
             }
         }
 
         for bias in self.bias.iter_mut() {
-            scaled_rand(&mut rng, rate, 0.01, 0.01, bias);
+            if rng.gen_range(0..100) < 5 {
+                scaled_rand(&mut rng, rate, 0.2, 0.2, bias);
+            }
         }
     }
     fn init<R: Rng>(mut r: R) -> Self {

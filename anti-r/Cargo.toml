@@ -14,8 +14,8 @@ categories = ["algorithms", "data-structure", "game-development", "no-std"]
 
 [dev-dependencies]
 criterion = "0.3"
-rstar = "*"
-rand = "*"
+rstar = "0.8.2"
+rand = "0.8.3"
 
 [[bench]]
 name = "r_vs_no"

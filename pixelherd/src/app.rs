@@ -240,7 +240,7 @@ impl<B: Brain + Send + Sync> App<B> {
                         // clamp to valid range on each iteration
                         // datatype is valid from -16 to 16
                         // but 0-10 is the only sensible value range for application domain
-                        // this is important for determinism as saturations/wraparounds break determinism
+                        // this is important for determinism as saturations break determinism
                         // (well except we only do subtraction, so saturating would be fine)
                         *w = (*r.get_mut()).clamp((-1).into(), 12.into());
                     }
@@ -251,8 +251,7 @@ impl<B: Brain + Send + Sync> App<B> {
                     for (w, r) in w.iter_mut().zip(r.iter_mut()) {
                         // clamp to valid range on each iteration
                         // datatype is valid from -128 to 128
-                        // but 0-10 is the only sensible value range for application domain
-                        // this is important for determinism as saturations/wraparounds break determinism
+                        // this is important for determinism as saturations break determinism
                         // meat actually gets subtracted (eaten) and added to (deaths)
                         *w = (*r.get_mut()).clamp((-1).into(), 70.into());
                     }
@@ -296,7 +295,7 @@ impl<B: Brain + Send + Sync> App<B> {
             self.genes.push(g);
         }
 
-        // can't just do retain as i need to drop from both new and genes.
+        // can't just do retain as I need to drop from both new and genes.
         // notice the rev() call though so all is fine
         let deaths = new
             .iter()
@@ -388,6 +387,9 @@ impl<B: Brain + Send + Sync> App<B> {
             })
             .map(|(index, s)| (s.pos, index))
             .collect();
+        // todo: blips close to any edge should be inserted twice,
+        // currently blips can't look/collide across edges.
+        // different option would be to fix this in the distance calculations.
         self.tree = SpatVec::new_from(tree);
     }
 }

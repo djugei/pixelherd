@@ -60,11 +60,11 @@
 //!     a calculation changes the scale (exponent) of the number.
 //! Rationals are always on the same scale but you now have to deal with range overflows.
 //!
-//! The easiest behaviour is to use wrapping_op.
+//! The easiest behaviour is to use wrapping\_op.
 //! It always succeeds and can be executed in any order with any values without loosing determinism.
 //! This might not be sensible behaviour for your use-case though.
 //!
-//! The second-easiest is to use is checked_op with unwrap.
+//! The second-easiest is to use is checked\_op with unwrap.
 //! This is probably fine if you have a base value that is only changed in small increments.
 //! Choose a slightly bigger representable range and do the overflow handling in synchronous code,
 //!     for example by clamping to the valid range
@@ -72,12 +72,12 @@
 //!
 //! You can not,
 //!     at least not naively,
-//! actually check the checked_op,
+//! actually check the checked\_op,
 //!     as that would generally lead to behaviour differences on different execution orders.
 //! Correctly doing this is the hardest option,
 //!     but might be required for correctness.
 //!
-//! Using saturating_op can be perfectly valid,
+//! Using saturating\_op can be perfectly valid,
 //!     but you need to be careful that the value can only be pushed into one direction
 //!         (either towards max or towards min).
 //! Otherwise different execution orders lead to different results.
@@ -122,7 +122,7 @@
 //! but might need to wait for better const generics.
 //!
 //! # nightly
-//! This crate very much inherently relies on const generics (min_const_generics).
+//! This crate very much inherently relies on const generics (min\_const\_generics).
 
 #![no_std]
 #![feature(min_const_generics)]

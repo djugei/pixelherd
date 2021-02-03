@@ -6,7 +6,7 @@ edition = "2018"
 description = "A spatial data structure outperforming r-trees in some cases"
 license = "Apache-2.0"
 repository = "https://github.com/djugei/pixelherd"
-categories = ["algorithms", "data-structure", "game-development", "no-std"]
+categories = ["algorithms", "data-structures", "game-development", "no-std"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

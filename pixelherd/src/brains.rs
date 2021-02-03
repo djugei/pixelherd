@@ -70,18 +70,18 @@ impl Outputs {
     }
     /// (0, MAX_SPEED)
     pub fn speed(&self) -> f64 {
-        // the exp is to undo the sigmoid from the nn, maybe i can output raws and do the
-        // sigmoid inline on the getters since they are read about once each mostly
+        // (-0.5, 0.5)
+        let mut speed = self.data[2];
+        // (-0.05, 0.5)
+        if speed <= 0. {
+            speed /= 10.
+        }
+        // (0, 0.55)
+        speed += 0.05;
         // (0, 1)
-        let a = (self.data[2] + 0.5);
-        // (1, e)
-        let b = a.exp();
-        // (0, e-1)
-        // ~= (0, 1.72)
-        let c = b - 1.;
-        let speedup = config::b::MAX_SPEED / (std::f64::consts::E - 1.);
-        // (0, MAX_SPEED)
-        c * speedup
+        speed /= 0.55;
+        speed *= config::b::MAX_SPEED;
+        speed
     }
     // these are [-0.5, 0.5]
     pub fn rgb_raw(&self) -> &[f64; 3] {

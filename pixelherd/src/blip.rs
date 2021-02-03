@@ -156,7 +156,7 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
             // full consumption on 5 food, double on 15
             let gridfactor = 0.5 + (grid_value / 10.);
             // 1..11
-            let div = 1. + (outputs.speed() * 2.5);
+            let div = 1. + (outputs.speed() * 10.);
             (max * gridfactor / div).min(grid_value)
         };
         let consumption = (consumption_c)(grid_value) * (1. - self.genes.vore);
@@ -419,7 +419,7 @@ impl<B: Brain> Genes<B> {
         use std::f64::consts::PI;
         Self {
             brain: B::init(&mut rng),
-            mutation_rate: (rng.gen_range(-0.001..0.001) + 0.01) * 4.,
+            mutation_rate: (rng.gen_range(-0.001..0.001) + 0.01) * 10.,
             repr_tres: rng.gen_range(-10.0..10.) + 100.,
             clockstretch_1: rng.gen_range(0.01..1.),
             clockstretch_2: rng.gen_range(0.01..1.),

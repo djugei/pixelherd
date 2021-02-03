@@ -1,7 +1,7 @@
 //todo: extract a lot of numbers into config.
 //todo: make config dynamic (read at start of runtime)
-pub const FOOD_WIDTH: usize = 180;
-pub const FOOD_HEIGHT: usize = 180;
+pub const FOOD_WIDTH: usize = 100;
+pub const FOOD_HEIGHT: usize = 100;
 
 pub const INITIAL_CELLS: usize = 100;
 pub const REPLACEMENT: usize = 5;
@@ -13,7 +13,7 @@ pub mod b {
     pub const LOCAL_ENV: f64 = 1500.;
     pub const MAX_SPEED: f64 = 10.;
     // how much energy is used by just existing vs by moving
-    pub const IDLE_E_RATIO: f64 = 0.3;
+    pub const IDLE_E_RATIO: f64 = 0.5;
     // how much energy is used by a blip at max speed/second
     pub const E_DRAIN: f64 = 1.;
     pub const N_EYES: usize = 3;

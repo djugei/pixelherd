@@ -1,11 +1,11 @@
 [package]
 name = "fix-rat"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["djugei <ddjugei@gmail.com>"]
 edition = "2018"
 description = "A rational number type with fixed denominator"
 license = "Apache-2.0"
-repository = "https://github.com/djugei/pixelherd/fix-rat"
+repository = "https://github.com/djugei/pixelherd"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

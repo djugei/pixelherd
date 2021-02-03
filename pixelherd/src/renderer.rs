@@ -79,7 +79,20 @@ impl Renderer {
             );
             let transform = pos_transform.orient(pdx, pdy).rot_deg(90.);
             if Some(index) == marker {
-                polygon(status.rgb, TRI, transform.zoom(2.), gl);
+                let mut rgb = status.rgb;
+                let min = rgb.iter().min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
+                let min = *min;
+                let max = rgb
+                    .iter()
+                    .take(3)
+                    .max_by(|a, b| a.partial_cmp(b).unwrap())
+                    .unwrap();
+                let max = *max - min;
+                rgb.iter_mut().take(3).for_each(|v| {
+                    *v -= min;
+                    *v *= 1. / max
+                });
+                polygon(rgb, TRI, transform.zoom(2.), gl);
                 let tree = app.tree();
                 let search = tree
                     .query_distance(&status.pos, config::b::LOCAL_ENV)
@@ -131,6 +144,7 @@ impl Renderer {
                 );
                 let size = 20_usize;
                 display_text(&display, glyph_cache, pos_transform, WHITE, size, gl).unwrap();
+                genes.brain.draw(gl, pos_transform);
             } else {
                 polygon(status.rgb, TRI, transform, gl);
             }

@@ -3,6 +3,8 @@ use crate::blip::scaled_rand;
 use crate::config;
 use rand::Rng;
 use std::convert::TryInto;
+
+use opengl_graphics::GlGraphics;
 // 3 memory cells
 // eyes are 3 colours, angle, dist
 const N_INPUTS: usize = 5 + 3 + (config::b::N_EYES * 5);
@@ -110,6 +112,7 @@ pub trait Brain: Clone {
     fn init<R: Rng>(rng: R) -> Self;
     fn think(&self, inputs: &Inputs) -> Outputs;
     fn mutate<R: Rng>(&mut self, rng: R, rate: f64);
+    fn draw(&self, gl: &mut GlGraphics, trans: [[f64; 3]; 2]);
 }
 
 // todo: bigbrain is currently too inflexible, it just outputs values very close to 0 for basically
@@ -127,6 +130,9 @@ pub struct BigBrain {
 }
 
 impl Brain for BigBrain {
+    fn draw(&self, gl: &mut GlGraphics, trans: [[f64; 3]; 2]) {
+        todo!()
+    }
     fn mutate<R: Rng>(&mut self, mut rng: R, rate: f64) {
         for mid in &mut self.in2mid {
             for inp in mid.iter_mut() {
@@ -216,6 +222,27 @@ pub struct SimpleBrain {
 }
 
 impl Brain for SimpleBrain {
+    fn draw(&self, gl: &mut GlGraphics, trans: [[f64; 3]; 2]) {
+        use graphics::Transformed;
+        for (out_n, out_v) in self.weights.iter().enumerate() {
+            for (in_n, in_v) in out_v.iter().enumerate() {
+                let base = -(INNER_SIZE as f64);
+                let out_n = out_n as f64;
+                // draw from left to right, but starting far enough to the left so it ends right
+                // at the centre line to avoid overlap
+                let h = (base + out_n) * 10.;
+                let v = (in_n * 10) as f64;
+                let transform = trans.trans(h, v);
+
+                let pos = if *in_v > 0. { 1. } else { 0. };
+                let neg = 1. - pos;
+                let col = [pos, 0., neg, (in_v.abs() + 0.5) as f32];
+
+                graphics::rectangle([1.; 4], [0., 0., 10., 10.], transform, gl);
+                graphics::rectangle(col, [0., 0., 10., 10.], transform, gl)
+            }
+        }
+    }
     fn mutate<R: Rng>(&mut self, mut rng: R, rate: f64) {
         for out in &mut self.weights {
             for inp in out.iter_mut() {
@@ -261,6 +288,9 @@ impl Brain for SimpleBrain {
 }
 
 impl<B: Brain> Brain for Box<B> {
+    fn draw(&self, gl: &mut GlGraphics, trans: [[f64; 3]; 2]) {
+        self.as_ref().draw(gl, trans)
+    }
     fn mutate<R: Rng>(&mut self, rng: R, rate: f64) {
         self.as_mut().mutate(rng, rate)
     }

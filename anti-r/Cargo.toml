@@ -1,6 +1,6 @@
 [package]
 name = "anti-r"
-version = "0.9.0"
+version = "0.9.1"
 authors = ["djugei <ddjugei@gmail.com>"]
 edition = "2018"
 description = "A spatial data structure outperforming r-trees in some cases"

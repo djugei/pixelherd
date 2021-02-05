@@ -84,7 +84,10 @@ fn query(c: &mut Criterion) {
                     let slice = points.as_spat_slice();
                     let (start, end) = slice.query_aabb(&lu, &rd);
                     // this is to be fair towards rtree, which returns an iterator that needs to be consumed
-                    slice[start..end].iter().map(|p| p.1).sum::<usize>()
+                    slice[start..end].iter()
+                    // todo: think about inclusive vs exclusive ranges
+                    .filter(|([_,y],_)| *y <= lu[1] && *y >= rd[1])
+                    .map(|p| p.1).sum::<usize>()
                 },
             )
         });

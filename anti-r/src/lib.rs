@@ -80,6 +80,12 @@ where
     ///     }
     ///     assert!(min.iter().zip(&max).all(|(min,max)| min<=max));
     ///  
+    /// This function may return more points than requested.
+    /// In fact for [f64;2] it will only reliably enclose by the first coordinate.
+    /// you need to do some post-filtering, for example by distance,
+    /// to further trim the results.
+    ///
+    /// If your points are [f64;2] the query_distance function provides such functionality.
     pub fn query_aabb(&self, min: &K, max: &K) -> (usize, usize) {
         // todo: in theory there is no need to do two queries, a slightly addapted binary search
         // is absolutely able to search for ranges

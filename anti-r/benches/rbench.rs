@@ -33,6 +33,13 @@ pub fn gen_query<R: Rng>(mut rng: R) -> ([f64; 2], [f64; 2]) {
     (lu, rd)
 }
 
+pub fn gen_query_range<R: Rng>(mut rng: R) -> ([f64; 2], f64) {
+    let center_x = rng.gen_range(-1000.0..1000.);
+    let center_y = rng.gen_range(-1000.0..1000.);
+    let offset = rng.gen_range(0.0..10.);
+    ([center_x, center_y], offset*offset)
+}
+
 pub fn mutate<R: Rng>(mut r: R, p: [f64; 2]) -> [f64; 2] {
     let off_x = r.gen_range(-MOVE..MOVE);
     let off_y = r.gen_range(-MOVE..MOVE);

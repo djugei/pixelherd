@@ -1,9 +1,9 @@
 [package]
 name = "anti-r"
-version = "0.9.1"
+version = "0.9.2"
 authors = ["djugei <ddjugei@gmail.com>"]
 edition = "2018"
-description = "A spatial data structure outperforming r-trees in some cases"
+description = "A spatial data structure outperforming r-trees for low numbers of elements"
 license = "Apache-2.0"
 repository = "https://github.com/djugei/pixelherd"
 categories = ["algorithms", "data-structures", "game-development", "no-std"]
@@ -13,7 +13,7 @@ categories = ["algorithms", "data-structures", "game-development", "no-std"]
 [dependencies]
 
 [dev-dependencies]
-criterion = "0.3"
+criterion = {version = "0.3", features = ["html_report",]}
 rstar = "0.8.2"
 rand = "0.8.3"
 

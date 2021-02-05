@@ -2,7 +2,7 @@
 
 <!-- cargo-sync-readme start -->
 
-Anti-R contains a alternative spatial data structure that outperforms R-Trees in many cases.
+Anti-R contains a alternative spatial data structure that outperforms R-Trees for low amounts of nodes.
 
 # Performance:
 R-Trees and anti-r have the same O(n) complexity for all operations,
@@ -20,9 +20,8 @@ Full updates and bulk-loads are equivalent in speed for Anti-R.
 For R-Trees full updates are never worth it,
 a full reconstruction is simply faster.
 
-Zero to a bit more than 100\_000 elements are faster to query for Anti-R.
-R-Trees start winning at above 200\_000 elements.
-This is probably when (on the benchmarking machine) L1-cache is overrun.
+Zero to a bit more than 10\_000 elements are faster to bounding box-query for Anti-R.
+Zero to about 1000 elements are faster to distance-query for Anti-R.
 
 R-Trees might be catching up quicker if the elements are weirdly distributed.
 

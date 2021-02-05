@@ -7,6 +7,7 @@ mod rbench;
 use rbench::build_rtree;
 use rbench::gen_points;
 use rbench::gen_query;
+use rbench::gen_query_range;
 use rbench::mutate;
 use rbench::preprocess_points;
 use rbench::rtree_gen_update;
@@ -14,7 +15,7 @@ use rbench::Loc;
 
 use anti_r::SpatVec;
 
-criterion_group!(benches, load, query, update);
+criterion_group!(benches, load, query, query_range, update);
 criterion_main!(benches);
 
 fn plotconf() -> PlotConfiguration {
@@ -84,10 +85,56 @@ fn query(c: &mut Criterion) {
                     let slice = points.as_spat_slice();
                     let (start, end) = slice.query_aabb(&lu, &rd);
                     // this is to be fair towards rtree, which returns an iterator that needs to be consumed
-                    slice[start..end].iter()
-                    // todo: think about inclusive vs exclusive ranges
-                    .filter(|([_,y],_)| *y <= lu[1] && *y >= rd[1])
-                    .map(|p| p.1).sum::<usize>()
+                    slice[start..end]
+                        .iter()
+                        // todo: think about inclusive vs exclusive ranges
+                        .filter(|([_, y], _)| *y <= lu[1] && *y >= rd[1])
+                        .map(|p| p.1)
+                        .sum::<usize>()
+                },
+            )
+        });
+    }
+
+    group.finish()
+}
+
+fn query_range(c: &mut Criterion) {
+    let mut group = c.benchmark_group("query_range");
+    group.plot_config(plotconf());
+    group.warm_up_time(std::time::Duration::from_millis(200));
+    group.measurement_time(std::time::Duration::from_secs(1));
+    group.sample_size(250);
+    for s in 6..21 {
+        let num = 1 << s;
+        let points = gen_points(num);
+        let data = preprocess_points(&points);
+        let tree = build_rtree(data);
+        let mut rng = rand::thread_rng();
+
+        group.bench_with_input(BenchmarkId::new("rtree", num), &num, |b, _num| {
+            b.iter_with_setup(
+                || gen_query_range(&mut rng),
+                |(point, distance)| {
+                    let res = tree
+                        .locate_within_distance(point, distance)
+                        // gotta do something with the iterator, otherwise its lazy
+                        .map(|p| p.data)
+                        .sum::<usize>();
+                    res
+                },
+            )
+        });
+
+        let points = SpatVec::new_from(points);
+
+        group.bench_with_input(BenchmarkId::new("antir", num), &num, |b, _num| {
+            b.iter_with_setup(
+                || gen_query_range(&mut rng),
+                |(point, distance)| {
+                    let slice = points.as_spat_slice();
+                    let results = slice.query_distance(&point, distance);
+                    results.map(|p| p.1 .1).sum::<usize>()
                 },
             )
         });

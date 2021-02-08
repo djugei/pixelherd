@@ -5,6 +5,85 @@
 //     don't)
 // 11. balance simulation so scavenging and hunting are valid strategies
 // 12. re-think speed, it currently does not play nice with brain output, "neutral" output is forward currently
+// 13. introduce genetics
+
+//! Pixelherd is a deterministic high performance evolutionary animal simulation
+//! 
+//! Lets go over this step by step from the back.
+//! 
+//! ## Animal Simulation
+//! The simulated world in pixelherd is a grid,
+//! each slot in the grid has a certain amount of vegetable and meat food.
+//! 
+//! In this world there exist a number of simple animals, called "blips" in the code.
+//! They can sense a lot of things from their environment and about themselves,
+//! like how much food is at their current location, how healthy they themselves are, etc.
+//!
+//! They can also sense things about other blips, which colour they are and how fast blips
+//! around them are moving for example.
+//!
+//! They can not only sense things, they can also interact with the world and other blips,
+//! mainly through two means: They can control where they are going and how fast,
+//! and they can extend a spike to ram into others. They can also change colour which can be
+//! sensed by other blips.
+//!
+//! The inputs and the outputs are connected by a brain, a simple artificial neural network.
+//! It gets fed with all the inputs and calculates what it considers appropriate outputs in reaction.
+//! It even has a bit of memory and a sense of time.
+//! Now, unlike a lot of neural networks, this one is not trained, instead it is evolved,
+//! which leads to the next keyword.
+//!
+//! ## Evolutionary
+//! Blips reproduce when they have enough food, creating an almost identical copy of themselves.
+//! Some of the properties of the child are randomly mutated.
+//! If the changes are beneficial then the child will reproduce more on average, which also spreads
+//! the mutation.
+//!
+//! Note that at least right now pixelherd is not a genetic simulation, there is no gene pool,
+//! no sexual reproduction. There might be in the future as this would allow single genes to
+//! proliferate instead of having to drag around all the entire genetic information they happen to
+//! be around at time of mutation. It could also lead to interesting courtship behaviour.
+//!
+//! ## High Performance
+//! High performance in this case does not refer to the code being very well optimized or
+//! the simulation trying to take some kind of shortcuts. Instead it refers to its ability to utilize
+//! a large amounts of parallel processors and only having very little code that needs to be executed
+//! in series.
+//! 
+//! ## Deterministic
+//! This one is rather simple:
+//! When re-executed with the same seed and configuration the simulation will lead to the same results.
+//! 
+//! Or rather: it would be if not for the parallel execution.
+//! No matter in which order things are executed, the results must stay the same.
+//!
+//! # Hacking
+//! The code is meant to be hacked, modified, played around with.
+//! Open main.rs to read the non-doc comments about how the above properties are implemented
+//! and how the project is structured.
+
+// Welcome to the *code* :)
+// The main fun is the App::update() function in the app module.
+// It gets called by main() after doing some setup to display things and handle input.
+// It can be called on its own though, if you just want results, no visualisation.
+// Visualisation is handled by the Renderer struct in the renderer module.
+// The render() function is probably the ugliest bit of code in here,
+// so lets talk about the App::update() method instead:
+//
+// it does a bit of bookkeeping, then, in parallel, updates all blips (from the blip module)
+// by calling the Blip::update() function.
+// Afterwards it handles births and deaths, does a bit more bookkeeping
+// and is ready for the next go around.
+//
+// The Blip::update() function has three parts.
+// First it collects inputs, then it feeds them into its brain.
+// Finally it reads the Brains output and acts on them.
+//
+// There is more detail on how things work in the doc comments on the individual mentioned
+// structs and methods.
+// If you just want to quickly change some parameters have a look at the config module.
+// Or you can read through main() and discover all key bindings.
+
 
 use opengl_graphics::{GlGraphics, OpenGL};
 use sdl2_window::Sdl2Window as Window;
@@ -15,6 +94,11 @@ use piston::input;
 use piston::input::{ButtonEvent, RenderEvent, UpdateArgs, UpdateEvent};
 use piston::window::WindowSettings;
 
+// this allows you to put values into a tweak!() macro, and modify them
+// while the code is running.
+// As in you literally put a different value into the source code, save, and it live-updates.
+// Kinda crazy what these computers can do.
+// This obviously breaks determinism though.
 #[allow(unused)]
 use inline_tweak::tweak;
 
@@ -52,7 +136,6 @@ use renderer::Renderer;
 // todo: make sure this is actually true, something seems fucky
 
 fn main() {
-    // Change this to OpenGL::V2_1 if not working.
     // fixme: i don't want to manually be guessing opengl versions
     let opengl = OpenGL::V4_5;
 
@@ -63,6 +146,7 @@ fn main() {
         .build()
         .unwrap();
 
+    // try to restore previous state, if it exists.
     let oa = std::fs::File::open("savestate")
         .ok()
         .map(|f| App::new_from(f, "report".into()).ok())
@@ -70,7 +154,11 @@ fn main() {
     if oa.is_some() {
         println!("loading from savestate")
     };
+    // otherwise build a new simulation.
     let mut app: App<brains::SimpleBrain> = oa.unwrap_or_else(|| App::new(1234, "report".into()));
+
+
+    // graphics stuff
     let mut render = Renderer {
         gl: GlGraphics::new(opengl),
         mousepos: [0.; 2],
@@ -107,7 +195,9 @@ fn main() {
         }
         Err(bytes) => opengl_graphics::GlyphCache::from_bytes(bytes, (), ts).unwrap(),
     };
+    // end of graphics stuff
 
+    // input and event handling.
     let mut speed = 1;
     let mut pause = false;
     let mut hyper = false;

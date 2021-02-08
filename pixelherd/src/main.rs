@@ -1,9 +1,10 @@
 // todo:
 // 3. port one or both of the brains from c++
-// 7. add state, both for pausing/resuming simulation and for extracting successful specimen
+// 7. enable extraction of successful specimen
 // 10. make sure distance calculations correctly work with the wraparound world (hint: rn they
 //     don't)
 // 11. balance simulation so scavenging and hunting are valid strategies
+// 12. re-think speed, it currently does not play nice with brain output, "neutral" output is forward currently
 
 use opengl_graphics::{GlGraphics, OpenGL};
 use sdl2_window::Sdl2Window as Window;

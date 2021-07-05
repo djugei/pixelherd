@@ -125,19 +125,12 @@
 //! This crate very much inherently relies on const generics (min\_const\_generics).
 
 #![no_std]
-#![feature(min_const_generics)]
-#![cfg(feature = "nightly")]
-#![allow(incomplete_features)]
-#![cfg(feature = "nightly")]
 
-#[cfg(feature = "nightly")]
 pub use nightly::Rational;
 
-#[cfg(feature = "nightly")]
 /// Can store -10 to 10 with a bit of wiggle room.
 pub type TenRat = Rational<{ i64::MAX / 16 }>;
 
-#[cfg(feature = "nightly")]
 /// Can store -100 to 100 with a bit of wiggle room.
 pub type HundRat = Rational<{ i64::MAX / 128 }>;
 

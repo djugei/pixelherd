@@ -16,6 +16,8 @@ categories = ["algorithms", "data-structures", "game-development", "no-std"]
 criterion = {version = "0.3", features = ["html_reports",]}
 rstar = "0.8.2"
 rand = "0.8.3"
+quickcheck = "1"
+quickcheck_macros = "1"
 
 [[bench]]
 name = "r_vs_no"

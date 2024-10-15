@@ -16,7 +16,7 @@ piston2d-opengl_graphics = "*"
 font-kit = "*"
 
 
-rand = "*"
+rand = "0.8"
 rand_pcg = { version = "*", features = ["serde1"] } 
 inline_tweak = "*"
 
@@ -28,4 +28,4 @@ fix-rat = {path="../fix-rat", features = ["serde1"]}
 serde = "*"
 serde_derive = "*"
 bigmatrix = {path="../bigmatrix"}
-bincode = "*"
+bincode = { version="1.3" }

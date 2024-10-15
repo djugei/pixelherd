@@ -13,9 +13,9 @@ categories = ["algorithms", "data-structures", "game-development", "no-std"]
 [dependencies]
 
 [dev-dependencies]
-criterion = {version = "0.3", features = ["html_reports",]}
-rstar = "0.8.2"
-rand = "0.8.3"
+criterion = {version = "0.6", features = ["html_reports",]}
+rstar = "0.12"
+rand = "0.9"
 
 [[bench]]
 name = "r_vs_no"

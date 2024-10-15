@@ -402,6 +402,11 @@ mod nightly {
         }
     }
 
+    /// safety: this is literally just a i64, transparent representation and all, this is therefore
+    /// safe.
+    /// can not auto-derive cause the derive macro can not very alignment in generic types.
+    unsafe impl<const DENOM: i64> bytemuck::NoUninit for Rational<DENOM> {}
+
     // well guess no mul/div then
     /*
     impl<const DENOMS: i64, const DENOMO: i64> core::ops::Mul<Rational<DENOMO>> for Rational<DENOMS> {
@@ -454,7 +459,7 @@ fn displaytest() {
 fn serde_test() {
     let r: TenRat = 3.0.into();
     use bincode;
-    let s = bincode::serialize(&r).unwrap();
-    let d = bincode::deserialize(&s).unwrap();
-    assert_eq!(r, d);
+    let s = bincode::serde::encode_to_vec(&r, bincode::config::standard()).unwrap();
+    let d = bincode::serde::decode_from_slice(&s, bincode::config::standard()).unwrap();
+    assert_eq!(r, d.0);
 }

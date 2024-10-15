@@ -158,19 +158,19 @@ impl Brain for BigBrain {
         let mut s: Self = Default::default();
         for mid in &mut s.in2mid {
             for inp in mid.iter_mut() {
-                *inp = r.gen_range(-0.1..0.1);
+                *inp = r.random_range(-0.1..0.1);
             }
         }
         for out in &mut s.mid2out {
             for mid in out.iter_mut() {
-                *mid = r.gen_range(-0.1..0.1);
+                *mid = r.random_range(-0.1..0.1);
             }
         }
         for bias in &mut s.mid_bias {
-            *bias = r.gen_range(-0.01..0.01);
+            *bias = r.random_range(-0.01..0.01);
         }
         for bias in &mut s.out_bias {
-            *bias = r.gen_range(-0.01..0.01);
+            *bias = r.random_range(-0.01..0.01);
         }
         s
     }
@@ -246,14 +246,14 @@ impl Brain for SimpleBrain {
     fn mutate<R: Rng>(&mut self, mut rng: R, rate: f64) {
         for out in &mut self.weights {
             for inp in out.iter_mut() {
-                if rng.gen_range(0..100) < 5 {
+                if rng.random_range(0..100) < 5 {
                     scaled_rand(&mut rng, rate, 0.2, 0.2, inp);
                 }
             }
         }
 
         for bias in self.bias.iter_mut() {
-            if rng.gen_range(0..100) < 5 {
+            if rng.random_range(0..100) < 5 {
                 scaled_rand(&mut rng, rate, 0.2, 0.2, bias);
             }
         }
@@ -262,11 +262,11 @@ impl Brain for SimpleBrain {
         let mut s: Self = Default::default();
         for out in &mut s.weights {
             for inp in out.iter_mut() {
-                *inp = r.gen_range(-0.1..0.1);
+                *inp = r.random_range(-0.1..0.1);
             }
         }
         for bias in &mut s.bias {
-            *bias = r.gen_range(-0.01..0.01);
+            *bias = r.random_range(-0.01..0.01);
         }
         s
     }

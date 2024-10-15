@@ -133,14 +133,25 @@ pub struct App<B: Brain + Send + Sync> {
     report_file: Option<std::fs::File>,
 }
 impl<B: Brain + Send + Sync + Serialize + DeserializeOwned> App<B> {
-    pub fn new_from<R: std::io::Read>(r: R, report_path: Option<&str>) -> bincode::Result<Self> {
+    pub fn new_from<R: std::io::Read>(
+        mut r: R,
+        report_path: Option<&str>,
+    ) -> Result<Self, bincode::error::DecodeError> {
         let report_file = report_path.map(std::fs::File::create).map(Result::unwrap);
-        let sa: SerializeApp<_> = bincode::deserialize_from(r)?;
+        let sa: SerializeApp<_> =
+            bincode::serde::decode_from_std_read(&mut r, bincode::config::standard())?;
         let s = sa.unpack(report_file);
         Ok(s)
     }
-    pub fn write_into<W: std::io::Write>(&mut self, w: W) -> bincode::Result<()> {
-        bincode::serialize_into(w, &SerializeApp::pack(self))
+    pub fn write_into<W: std::io::Write>(
+        &mut self,
+        mut w: W,
+    ) -> Result<usize, bincode::error::EncodeError> {
+        bincode::serde::encode_into_std_write(
+            &SerializeApp::pack(self),
+            &mut w,
+            bincode::config::standard(),
+        )
     }
 }
 
@@ -200,8 +211,8 @@ impl<B: Brain + Send + Sync> App<B> {
         for w in 0..config::FOOD_WIDTH {
             for h in 0..config::FOOD_HEIGHT {
                 //fixme: this should be an exponential distribution instead
-                if app.rng.gen_range(0..3) == 1 {
-                    *app.vegtables[w][h].get_mut() = app.rng.gen_range(0.0..10.).into();
+                if app.rng.random_range(0..3) == 1 {
+                    *app.vegtables[w][h].get_mut() = app.rng.random_range(0.0..10.).into();
                 }
             }
         }
@@ -340,13 +351,13 @@ impl<B: Brain + Send + Sync> App<B> {
         // chance could be > 1 if dt or replenish are big enough
         let mut chance = (config::REPLENISH * config::STEP_SIZE) / 4.;
         while chance > 0. {
-            if self.rng.gen_bool(chance.min(1.)) {
-                let w: usize = self.rng.gen_range(0..config::FOOD_WIDTH);
-                let h: usize = self.rng.gen_range(0..config::FOOD_HEIGHT);
+            if self.rng.random_bool(chance.min(1.)) {
+                let w: usize = self.rng.random_range(0..config::FOOD_WIDTH);
+                let h: usize = self.rng.random_range(0..config::FOOD_HEIGHT);
                 let grid = self.vegtables[w][h].get_mut();
                 // expected: 4, chances is divided by 4
                 // trying to get a less uniform food distribution
-                let f: TenRat = self.rng.gen_range(3.0..5.).into();
+                let f: TenRat = self.rng.random_range(3.0..5.).into();
                 *grid = grid.saturating_add(f);
             }
             chance -= 1.;
@@ -567,15 +578,15 @@ fn determinism() {
 #[test]
 #[should_panic]
 fn float_assoc() {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let tests = 1_000;
 
     for _i in 0..tests {
-        let a: f64 = rng.gen_range(-10.0..10.);
+        let a: f64 = rng.random_range(-10.0..10.);
         for _j in 0..tests {
-            let b: f64 = rng.gen_range(-10.0..10.);
+            let b: f64 = rng.random_range(-10.0..10.);
             for _k in 0..tests {
-                let c: f64 = rng.gen_range(-10.0..10.);
+                let c: f64 = rng.random_range(-10.0..10.);
                 assert_eq!(a + b + c, a + c + b);
                 assert_eq!(a - b - c, a - c - b);
                 assert_eq!(a * b * c, a * c * b);
@@ -589,15 +600,15 @@ fn float_assoc() {
 #[should_panic]
 // even storing as f32 and calculating in f64 does not help
 fn float_assoc_trunc() {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let tests = 1_000;
 
     for _i in 0..tests {
-        let a: f32 = rng.gen_range(-10.0..10.);
+        let a: f32 = rng.random_range(-10.0..10.);
         for _j in 0..tests {
-            let b: f32 = rng.gen_range(-10.0..10.);
+            let b: f32 = rng.random_range(-10.0..10.);
             for _k in 0..tests {
-                let c: f32 = rng.gen_range(-10.0..10.);
+                let c: f32 = rng.random_range(-10.0..10.);
                 let a = a as f64;
                 let b = b as f64;
                 let c = c as f64;
@@ -632,16 +643,20 @@ fn matrix_ser_de() {
     let mut t: T = T {
         e: [[Default::default(); 33]; 44],
     };
-    let mut rng = rand::thread_rng();
+
+    use rand::distr::Distribution;
+    use std::convert::TryFrom;
+    let mut rng = rand::rng();
+    let range = rand::distr::Uniform::try_from(0..usize::MAX).unwrap();
     for l in t.e.iter_mut() {
         for e in l.iter_mut() {
-            *e = rng.gen();
+            *e = range.sample(&mut rng);
         }
     }
     let t = t;
     use bincode;
-    let ser: Vec<u8> = bincode::serialize(&t).unwrap();
-    let de = bincode::deserialize(&ser).unwrap();
+    let ser: Vec<u8> = bincode::serde::encode_to_vec(&t, bincode::config::standard()).unwrap();
+    let (de, _) = bincode::serde::decode_from_slice(&ser, bincode::config::standard()).unwrap();
     assert_eq!(t, de);
 }
 
@@ -665,8 +680,8 @@ fn ser_de_determinism() {
                 if i % 100 == 0 {
                     println!("serde determinism iteration {}", i);
                 }
-                app1.update(&UpdateArgs { dt: 0.02 });
-                app2.update(&UpdateArgs { dt: 0.02 });
+                app1.update();
+                app2.update();
                 if app1 != app2 {
                     use std::fs::File;
                     use std::io::Write;
@@ -681,8 +696,14 @@ fn ser_de_determinism() {
                 }
                 assert_eq!(app1, app2);
                 if i % 1000 == 0 {
-                    let a2s = bincode::serialize(&SerializeApp::pack(&mut app2)).unwrap();
-                    let a2d: SerializeApp<_> = bincode::deserialize(&a2s).unwrap();
+                    let a2s = bincode::serde::encode_to_vec(
+                        &SerializeApp::pack(&mut app2),
+                        bincode::config::standard(),
+                    )
+                    .unwrap();
+                    let (a2d, _s): (SerializeApp<_>, usize) =
+                        bincode::serde::decode_from_slice(&a2s, bincode::config::standard())
+                            .unwrap();
                     app2 = a2d.unpack(None);
                 }
             }

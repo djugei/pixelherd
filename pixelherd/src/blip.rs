@@ -342,11 +342,11 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
         };
     }
     pub fn new<R: Rng>(mut rng: R) -> (Status, Genes<B>) {
-        let x = rng.gen_range(0.0..config::SIM_WIDTH);
-        let y = rng.gen_range(0.0..config::SIM_HEIGHT);
+        let x = rng.random_range(0.0..config::SIM_WIDTH);
+        let y = rng.random_range(0.0..config::SIM_HEIGHT);
 
-        let dx = rng.gen_range(-30.0..30.);
-        let dy = rng.gen_range(-5.0..5.);
+        let dx = rng.random_range(-30.0..30.);
+        let dy = rng.random_range(-5.0..5.);
         (
             Status {
                 pos: [x, y],
@@ -424,18 +424,18 @@ impl<B: Brain> Genes<B> {
         use std::f64::consts::PI;
         Self {
             brain: B::init(&mut rng),
-            mutation_rate: (rng.gen_range(-0.001..0.001) + 0.01) * 10.,
-            repr_tres: rng.gen_range(-10.0..10.) + 100.,
-            clockstretch_1: rng.gen_range(0.01..1.),
-            clockstretch_2: rng.gen_range(0.01..1.),
+            mutation_rate: (rng.random_range(-0.001..0.001) + 0.01) * 10.,
+            repr_tres: rng.random_range(-10.0..10.) + 100.,
+            clockstretch_1: rng.random_range(0.01..1.),
+            clockstretch_2: rng.random_range(0.01..1.),
             eyes: [
-                rng.gen_range(-PI..PI),
-                rng.gen_range(-PI..PI),
-                rng.gen_range(-PI..PI),
+                rng.random_range(-PI..PI),
+                rng.random_range(-PI..PI),
+                rng.random_range(-PI..PI),
             ],
             //eyes: [(-2. / 3.) * PI, 0., (2. / 3.) * PI],
             //eyes: [0., 0., 0.],
-            vore: rng.gen_range(0.0..1.),
+            vore: rng.random_range(0.0..1.),
         }
     }
 
@@ -447,27 +447,27 @@ impl<B: Brain> Genes<B> {
         brain.mutate(&mut rng, self.mutation_rate);
 
         let repr_tres =
-            self.repr_tres * (1. + rng.gen_range(-self.mutation_rate..self.mutation_rate));
+            self.repr_tres * (1. + rng.random_range(-self.mutation_rate..self.mutation_rate));
 
         let mutation_rate =
-            self.mutation_rate + (rng.gen_range(-self.mutation_rate..self.mutation_rate) / 10.);
+            self.mutation_rate + (rng.random_range(-self.mutation_rate..self.mutation_rate) / 10.);
 
         let clockstretch_1 =
-            self.clockstretch_1 * (1. + rng.gen_range(-self.mutation_rate..self.mutation_rate));
+            self.clockstretch_1 * (1. + rng.random_range(-self.mutation_rate..self.mutation_rate));
         let clockstretch_2 =
-            self.clockstretch_2 * (1. + rng.gen_range(-self.mutation_rate..self.mutation_rate));
+            self.clockstretch_2 * (1. + rng.random_range(-self.mutation_rate..self.mutation_rate));
 
         use std::f64::consts::PI;
         let mut eyes = self.eyes;
         for eye in eyes.iter_mut() {
-            *eye += rng.gen_range((-self.mutation_rate * PI)..(self.mutation_rate * PI));
+            *eye += rng.random_range((-self.mutation_rate * PI)..(self.mutation_rate * PI));
             // wrap around
             *eye %= PI;
         }
 
         let vore = self.vore
             + rng
-                .gen_range(-self.mutation_rate..self.mutation_rate)
+                .random_range(-self.mutation_rate..self.mutation_rate)
                 .max(0.)
                 .min(1.);
         Self {
@@ -482,8 +482,8 @@ impl<B: Brain> Genes<B> {
     }
 }
 pub fn scaled_rand<R: Rng>(mut r: R, rate: f64, abs_scale: f64, mul_scale: f64, val: &mut f64) {
-    *val += r.gen_range(-abs_scale..abs_scale) * r.gen_range(0.0..rate);
-    *val *= 1. + (r.gen_range(-mul_scale..mul_scale) * r.gen_range(0.0..rate));
+    *val += r.random_range(-abs_scale..abs_scale) * r.random_range(0.0..rate);
+    *val *= 1. + (r.random_range(-mul_scale..mul_scale) * r.random_range(0.0..rate));
 }
 
 pub fn base_angle(s: &Status) -> f64 {

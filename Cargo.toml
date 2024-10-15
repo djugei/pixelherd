@@ -4,10 +4,12 @@ members = ["pixelherd", "anti-r", "bigmatrix", "fix-rat"]
 [profile.dev.package."*"]
 # Set the default for dependencies in Development mode.
 opt-level = 3
+debug-assertions = false
+debug = 0
 
 [profile.dev]
 opt-level = 3
-panic="abort"
+#panic="abort"
 
 [profile.release]
 panic="abort"

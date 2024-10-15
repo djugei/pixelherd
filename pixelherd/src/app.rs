@@ -7,7 +7,6 @@ use anti_r::SpatSlice;
 use anti_r::SpatVec;
 use atomic::Atomic;
 use fix_rat::{HundRat, TenRat};
-use piston::input::UpdateArgs;
 use rand::Rng;
 use rand::SeedableRng;
 use rand_pcg::Pcg64Mcg as DetRng;
@@ -66,9 +65,9 @@ pub struct SerializeApp<B: Brain> {
     vegtables: OldVegGrid,
     #[serde(with = "BigMatrix")]
     meat: OldMeatGrid,
-    time: f64,
+    time: u64,
     rng: DetRng,
-    last_report: f64,
+    last_report: u64,
 }
 
 ///safety: only call this if T and Atomic<T> have the same in-memory representation
@@ -128,10 +127,9 @@ pub struct App<B: Brain + Send + Sync> {
     vegtables: VegGrid,
     meat: MeatGrid,
     tree: Tree,
-    // todo: complete switch to a tick based system (i.e. usize counter with global float stepsize)
-    time: f64,
+    time: u64,
     rng: DetRng,
-    last_report: f64,
+    last_report: u64,
     report_file: Option<std::fs::File>,
 }
 impl<B: Brain + Send + Sync + Serialize + DeserializeOwned> App<B> {
@@ -187,8 +185,8 @@ impl<B: Brain + Send + Sync> App<B> {
             tree: SpatVec::new_from(Vec::with_capacity(config::INITIAL_CELLS)),
             vegtables,
             meat,
-            time: 0.,
-            last_report: 0.,
+            time: 0,
+            last_report: 0,
             rng,
             report_file,
         };
@@ -209,9 +207,9 @@ impl<B: Brain + Send + Sync> App<B> {
         }
         app
     }
-    // fixme: make sure dt is used literally on every change
-    pub fn update(&mut self, args: &UpdateArgs) {
-        self.time += args.dt;
+
+    pub fn update(&mut self) {
+        self.time += 1;
         // update the inputs
         // todo: don't clone here, keep two buffers and swap instead
         let mut new = self.status.clone();
@@ -262,7 +260,7 @@ impl<B: Brain + Send + Sync> App<B> {
         // new is write only. if you need data from the last iteration
         // get it from old only.
         iter.for_each(|(index, mut new)| {
-            let seed = self.time.to_bits();
+            let seed = self.time.to_le();
             let seed = seed ^ (index as u64);
             // todo: better seeding, can seed from root rng, store rng with blip
             let mut rng = DetRng::seed_from_u64(seed);
@@ -277,7 +275,6 @@ impl<B: Brain + Send + Sync> App<B> {
                 &oldmeat,
                 &self.meat,
                 self.time,
-                args.dt,
             );
             if let Some(spawn) = spawn {
                 let mut guard = spawns.lock().unwrap();
@@ -341,7 +338,7 @@ impl<B: Brain + Send + Sync> App<B> {
         self.status = new;
 
         // chance could be > 1 if dt or replenish are big enough
-        let mut chance = (config::REPLENISH * args.dt) / 4.;
+        let mut chance = (config::REPLENISH * config::STEP_SIZE) / 4.;
         while chance > 0. {
             if self.rng.gen_bool(chance.min(1.)) {
                 let w: usize = self.rng.gen_range(0..config::FOOD_WIDTH);
@@ -361,13 +358,13 @@ impl<B: Brain + Send + Sync> App<B> {
             .par_iter_mut()
             .zip(&self.genes)
             .map(|(s, g)| Blip::from_components(s, g));
-        iter.for_each(|mut blip| blip.motion(args.dt));
+        iter.for_each(|mut blip| blip.motion());
 
         // update tree
         self.update_tree();
 
         // just to make sure ppl with old rust versions can't run this, fuck debian in particular
-        if self.time - self.last_report > std::f64::consts::TAU * 100. {
+        if self.time - self.last_report > (std::f64::consts::TAU * 100.) as u64 {
             self.write_report();
             self.last_report = self.time;
             // write to stdout more rarely
@@ -395,12 +392,12 @@ impl<B: Brain + Send + Sync> App<B> {
 }
 #[derive(Debug, PartialEq)]
 pub struct Report {
-    time: f64,
+    time: u64,
     num: usize,
-    age: f64,
+    age: u64,
     generation: usize,
     spawns: usize,
-    lineage: f64,
+    lineage: u64,
     veg: f64,
     avg_veg: f64,
     meat: f64,

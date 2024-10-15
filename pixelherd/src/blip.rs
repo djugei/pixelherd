@@ -35,8 +35,7 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
         veg: &VegGrid,
         oldmeat: &OldMeatGrid,
         meat: &MeatGrid,
-        time: f64,
-        dt: f64,
+        time: u64,
     ) -> Option<(Status, Genes<B>)> {
         // todo: split into input gathering, thinking and etc
         let mut inputs: brains::Inputs = Default::default();
@@ -100,7 +99,7 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
                     // todo: rename eye_vision, spike is an "eye" pointing straight ahead.
                     let col_angle = eye_vision(&self.status, own_base_angle, nb.pos).abs();
                     if col_angle < (0.05 * std::f64::consts::TAU) {
-                        self.status.spike -= 0.3 * dt;
+                        self.status.spike -= 0.3 * config::STEP_SIZE;
                     }
                 }
                 // get spiked
@@ -116,7 +115,11 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
                             if col_angle < (0.05 * std::f64::consts::TAU) {
                                 // i should really move to fixed step size.
                                 let damageconst = 1.;
-                                let damage = damageconst * relspeed * nbg.vore * nb.spike * dt;
+                                let damage = damageconst
+                                    * relspeed
+                                    * nbg.vore
+                                    * nb.spike
+                                    * config::STEP_SIZE;
                                 //println!("took {} damage from {}", damage, index);
                                 self.status.hp -= damage;
                                 spiked = true;
@@ -128,8 +131,8 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
         }
 
         // rust apparently does the modulo [-pi/2, pi/2] internally
-        *inputs.clock1_mut() = (time * self.genes.clockstretch_1).sin();
-        *inputs.clock2_mut() = (time * self.genes.clockstretch_2).sin();
+        *inputs.clock1_mut() = ((time as f64) * self.genes.clockstretch_1).sin();
+        *inputs.clock2_mut() = ((time as f64) * self.genes.clockstretch_2).sin();
 
         let x = self.status.pos[0] / 10.;
         let y = self.status.pos[1] / 10.;
@@ -151,7 +154,7 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
         //todo: put into config
         let consumption_c = |grid_value: f64| {
             // can eat 10 food / second (arbitrary)
-            let max = 10. * dt;
+            let max = 10. * config::STEP_SIZE;
             // half consumption speed on basically empty square
             // full consumption on 5 food, double on 15
             let gridfactor = 0.5 + (grid_value / 10.);
@@ -183,7 +186,7 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
             0.
         } else {
             // can eat 10 food / second (arbitrary)
-            let max = 10. * dt;
+            let max = 10. * config::STEP_SIZE;
             // half consumption speed on basically empty square
             // full consumption on 5 food, double on 15
             let gridfactor = 0.5 + (meat_grid_value / 10.);
@@ -213,10 +216,10 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
             .zip(outputs.memory())
             // slowly change memory to output
             // todo: maybe do this different for each memory field (short/long memory)
-            .for_each(|(m, nm)| *m = (*m * (1. - dt)) + (nm * dt));
+            .for_each(|(m, nm)| *m = (*m * (1. - config::STEP_SIZE)) + (nm * config::STEP_SIZE));
 
         // can only digest 2 out of the 10 theoretical max consumption food
-        let digest = self.status.food.min(2. * dt);
+        let digest = self.status.food.min(2. * config::STEP_SIZE);
         self.status.food -= digest;
         self.status.hp += digest;
 
@@ -228,8 +231,8 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
         ];
 
         // now outputs are filled, time to act on them
-        let spike = self.status.spike * (1. - dt);
-        let spike = spike + (outputs.spike() * dt);
+        let spike = self.status.spike * (1. - config::STEP_SIZE);
+        let spike = spike + (outputs.spike() * config::STEP_SIZE);
         self.status.spike = spike.min(1.).max(0.);
 
         // change direction
@@ -252,7 +255,7 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
         let movement = outputs.speed() / 10.;
         let ratiod =
             (idling * config::b::IDLE_E_RATIO) + (movement * (1. - config::b::IDLE_E_RATIO));
-        let exhaustion = ratiod * dt * config::b::E_DRAIN;
+        let exhaustion = ratiod * config::STEP_SIZE * config::b::E_DRAIN;
         self.status.hp -= exhaustion;
 
         // reproduce & mutate
@@ -266,7 +269,7 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
         } else {
             None
         };
-        self.status.age += dt;
+        self.status.age += 1;
 
         // time to die :)
         if self.status.hp < 0. {
@@ -274,8 +277,10 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
             // todo: make this configurable
             // todo: don't directly use age, use minimum consumed food during age
             // first bit of food is directly given
-            let food = age.min(50.);
+            let food = age.min(50);
             let remain = age - food;
+            let remain = remain as f64;
+            let food = food as f64;
             if spiked {
                 println!("dying from spiking")
             };
@@ -315,7 +320,7 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
 
     /// move the blip according to its velocity, wrapping around the world
     /// generally called after update()
-    pub fn motion(&mut self, dt: f64) {
+    pub fn motion(&mut self) {
         let pos = &mut self.status.pos;
         let delta = &mut self.status.vel;
 
@@ -323,8 +328,8 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
             dbg!(delta, pos);
             panic!();
         }
-        pos[0] += delta[0] * dt;
-        pos[1] += delta[1] * dt;
+        pos[0] += delta[0] * config::STEP_SIZE;
+        pos[1] += delta[1] * config::STEP_SIZE;
 
         pos[0] %= config::SIM_WIDTH;
         pos[1] %= config::SIM_HEIGHT;
@@ -349,12 +354,12 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
                 spike: 0.,
                 hp: 25.,
                 food: 5.,
-                age: 0.,
+                age: 0,
                 children: 0,
                 generation: 0,
                 rgb: [0.; 4],
                 memory: [0.; 3],
-                lineage: 0.,
+                lineage: 0,
             },
             Genes::new(&mut rng),
         )
@@ -369,7 +374,7 @@ impl<'s, 'g, B: Brain> Blip<'s, 'g, B> {
         let new_genes = self.genes.mutate(&mut rng);
         new_status.generation += 1;
         new_status.food = 0.;
-        new_status.age = 0.;
+        new_status.age = 0;
         new_status.children = 0;
         new_status.lineage += self.status.age;
         // push child away a bit
@@ -390,14 +395,14 @@ pub struct Status {
     pub food: f64,
     pub hp: f64,
     // instead of age store birth time maybe
-    pub age: f64,
+    pub age: u64,
     pub children: usize,
     pub generation: usize,
     pub rgb: [f32; 4],
     pub memory: [f64; 3],
     // the total age of ancestors until my birth
     // this is kindof more of a gene cause it never changes
-    pub lineage: f64,
+    pub lineage: u64,
 }
 
 #[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]

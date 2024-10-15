@@ -24,3 +24,6 @@ pub mod b {
 // replenish / (e_drain * idle_e_ratio) = number of supported idle blips
 // should probably be higher than replacement, or maybe not?
 pub const REPLENISH: f64 = 25.;
+
+// how many seconds pass per tick
+pub const STEP_SIZE: f64 = 0.02;

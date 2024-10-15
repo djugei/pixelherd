@@ -8,13 +8,13 @@
 // 13. introduce genetics
 
 //! Pixelherd is a deterministic high performance evolutionary animal simulation
-//! 
+//!
 //! Lets go over this step by step from the back.
-//! 
+//!
 //! ## Animal Simulation
 //! The simulated world in pixelherd is a grid,
 //! each slot in the grid has a certain amount of vegetable and meat food.
-//! 
+//!
 //! In this world there exist a number of simple animals, called "blips" in the code.
 //! They can sense a lot of things from their environment and about themselves,
 //! like how much food is at their current location, how healthy they themselves are, etc.
@@ -49,11 +49,11 @@
 //! the simulation trying to take some kind of shortcuts. Instead it refers to its ability to utilize
 //! a large amounts of parallel processors and only having very little code that needs to be executed
 //! in series.
-//! 
+//!
 //! ## Deterministic
 //! This one is rather simple:
 //! When re-executed with the same seed and configuration the simulation will lead to the same results.
-//! 
+//!
 //! Or rather: it would be if not for the parallel execution.
 //! No matter in which order things are executed, the results must stay the same.
 //!
@@ -77,6 +77,7 @@
 //
 // The Blip::update() function has three parts.
 // First it collects inputs, then it feeds them into its brain.
+// Next it thinks using the brain.
 // Finally it reads the Brains output and acts on them.
 //
 // There is more detail on how things work in the doc comments on the individual mentioned
@@ -84,14 +85,13 @@
 // If you just want to quickly change some parameters have a look at the config module.
 // Or you can read through main() and discover all key bindings.
 
-
 use opengl_graphics::{GlGraphics, OpenGL};
 use sdl2_window::Sdl2Window as Window;
 //use opengles_graphics::{GlGraphics, OpenGL};
 use input::mouse::MouseCursorEvent;
 use piston::event_loop::{EventSettings, Events};
 use piston::input;
-use piston::input::{ButtonEvent, RenderEvent, UpdateArgs, UpdateEvent};
+use piston::input::{ButtonEvent, RenderEvent, UpdateEvent};
 use piston::window::WindowSettings;
 
 // this allows you to put values into a tweak!() macro, and modify them
@@ -156,7 +156,6 @@ fn main() {
     };
     // otherwise build a new simulation.
     let mut app: App<brains::SimpleBrain> = oa.unwrap_or_else(|| App::new(1234, "report".into()));
-
 
     // graphics stuff
     let mut render = Renderer {
@@ -290,7 +289,7 @@ fn main() {
                 let times = if hyper { 1000 * speed } else { speed };
                 // always running fixed step now, for the determinism
                 for _ in 0..times {
-                    app.update(&UpdateArgs { dt: 0.02 });
+                    app.update();
                 }
             }
         }

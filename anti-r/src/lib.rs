@@ -28,6 +28,8 @@
 //! The benchmark results are exactly as expected though.
 
 #![no_std]
+#[cfg(test)]
+mod tests;
 
 /// A slice that supports spatial queries.
 ///

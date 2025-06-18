@@ -1,3 +1,4 @@
+#![feature(generic_const_exprs)]
 //! fix-rat is a rational number with the denominator chosen at compile time.
 //!
 //! It has a fixed valid range.
@@ -411,18 +412,19 @@ mod nightly {
     /// can not auto-derive cause the derive macro can not very alignment in generic types.
     unsafe impl<const DENOM: i64> bytemuck::NoUninit for Rational<DENOM> {}
 
-    // well guess no mul/div then
-    /*
-    impl<const DENOMS: i64, const DENOMO: i64> core::ops::Mul<Rational<DENOMO>> for Rational<DENOMS> {
+    impl<const DENOMS: i64, const DENOMO: i64> core::ops::Mul<Rational<DENOMO>> for Rational<DENOMS>
+    where
+        [(); { DENOMS * DENOMO } as usize]:,
+    {
         type Output = Rational<{ DENOMS * DENOMO }>;
-        fn mul(self, other: Self) -> Self {
+        fn mul(self, other: Rational<DENOMO>) -> Self::Output {
             Self::Output {
                 numer: self.numer * other.numer,
             }
         }
     }
-    */
 }
+
 #[test]
 fn converts() {
     let _tenrat: TenRat = 0.0.into();
@@ -430,6 +432,30 @@ fn converts() {
     let _tenrat: TenRat = (-1.0).into();
     let _tenrat: TenRat = 10.0.into();
     let _tenrat: TenRat = (-10.0).into();
+}
+
+#[test]
+fn maths() {
+    let num: Rational<{1<<30}> = 0.1.into();
+
+    let add = (num + num).to_f64() - 0.2;
+    assert!(add.abs() < 0.00001);
+
+    let sub = (num - num - num).to_f64() + 0.1;
+    assert!(sub.abs() < 0.00001);
+
+    let bignum: Rational<{1<<30}> = 10.0.into();
+    let mul = (num * num).to_f64() - 0.01;
+    assert!(mul.abs() < 0.00001);
+    let mul2 = (num * bignum).to_f64() - 1.0;
+    assert!(mul2.abs() < 0.00001);
+
+    /* TODO: add div..maybe
+    let div = (num / num).to_f64() - 1.0;
+    assert!(div.abs() < 0.00001);
+    let div2 = (num / bignum).to_f64() - 0.01;
+    assert!(div2.abs() < 0.00001)
+    */
 }
 
 #[test]

@@ -70,15 +70,19 @@ pub struct SerializeApp<B: Brain> {
     last_report: u64,
 }
 
-///safety: only call this if T and Atomic<T> have the same in-memory representation
+///SAFETY: only call this if T and Atomic<T> have the same in-memory representation
 unsafe fn food_s_to_a<T: Sized>(g: &OldFoodGrid<T>) -> FoodGrid<T> {
-    std::mem::transmute_copy(g)
+    unsafe {
+        std::mem::transmute_copy(g)
+    }
 }
 
-///safety: only call this if T and Atomic<T> have the same in-memory representation
+///SAFETY: only call this if T and Atomic<T> have the same in-memory representation
 ///the &mut is to force the atomic to not be in other threads
 unsafe fn food_a_to_s<T: Default>(g: &mut FoodGrid<T>) -> OldFoodGrid<T> {
-    std::mem::transmute_copy(g)
+    unsafe {
+        std::mem::transmute_copy(g)
+    }
 }
 
 impl<B: Brain + Send + Sync + Serialize + DeserializeOwned> SerializeApp<B> {

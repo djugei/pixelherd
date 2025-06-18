@@ -1,5 +1,6 @@
 [workspace]
 members = ["pixelherd", "anti-r", "bigmatrix", "fix-rat"]
+resolver = "3"
 
 [profile.dev.package."*"]
 # Set the default for dependencies in Development mode.

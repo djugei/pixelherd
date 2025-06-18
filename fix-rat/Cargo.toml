@@ -1,8 +1,8 @@
 [package]
 name = "fix-rat"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["djugei <ddjugei@gmail.com>"]
-edition = "2018"
+edition = "2024"
 description = "A rational number type with fixed denominator"
 license = "Apache-2.0"
 repository = "https://github.com/djugei/pixelherd"

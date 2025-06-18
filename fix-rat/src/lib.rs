@@ -1,4 +1,5 @@
-#![feature(generic_const_exprs)]
+#![no_std]
+#![cfg_attr(feature = "nightly", feature(generic_const_exprs))]
 //! fix-rat is a rational number with the denominator chosen at compile time.
 //!
 //! It has a fixed valid range.
@@ -122,12 +123,8 @@
 //! That could be improved,
 //! but might need to wait for better const generics.
 //!
-//! # nightly
-//! This crate very much inherently relies on const generics (min\_const\_generics).
-
-#![no_std]
-
-pub use nightly::Rational;
+//! # Nightly
+//! if you enable nightly the generic\_const\_exprs feature is used to provide primitive multiplication.
 
 /// Can store -10 to 10 with a bit of wiggle room.
 pub type TenRat = Rational<{ i64::MAX / 16 }>;
@@ -135,292 +132,291 @@ pub type TenRat = Rational<{ i64::MAX / 16 }>;
 /// Can store -100 to 100 with a bit of wiggle room.
 pub type HundRat = Rational<{ i64::MAX / 128 }>;
 
-mod nightly {
-    #[cfg(feature = "serde1")]
-    use serde as sd;
-    /// A ratonal number with a fixed denominator,
-    /// therefore `size_of<Rational>() == size_of<i64>()`.
+#[cfg(feature = "serde1")]
+use serde as sd;
+/// A ratonal number with a fixed denominator,
+/// therefore `size_of<Rational>() == size_of<i64>()`.
+///
+/// Plus operations have more intuitive valid ranges
+///
+/// If you want to represent numbers in range `-x` to `x`
+/// choose DENOM as `i64::MAX / x`.
+///
+/// [Rational] then subdivides the whole range into i64::MAX equally-sized parts.
+/// Smaller operations are lost,
+/// going outside the range overflows.
+///
+/// DENOM needs to be positive or you will enter the bizarro universe.
+///
+/// I would strongly recommend to choose DENOM as `1 << x` for x in 0..63.
+///
+/// The regular operations (+,-, *, /) behave just like on a regular integer,
+///     panic on overflow in debug mode,
+///     wrapping in release mode.
+/// Use the wrapping_op, checked_op or saturating_op methods
+///     to explicitly chose a behaviour.
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
+#[cfg_attr(feature = "serde1", derive(sd::Serialize, sd::Deserialize))]
+pub struct Rational<const DENOM: i64> {
+    numer: i64,
+}
+impl<const DENOM: i64> Rational<DENOM> {
+    /// Returns the underlying integer type,
+    /// for example for storing in an atomic number.
     ///
-    /// Plus operations have more intuitive valid ranges
-    ///
-    /// If you want to represent numbers in range `-x` to `x`
-    /// choose DENOM as `i64::MAX / x`.
-    ///
-    /// [Rational] then subdivides the whole range into i64::MAX equally-sized parts.
-    /// Smaller operations are lost,
-    /// going outside the range overflows.
-    ///
-    /// DENOM needs to be positive or you will enter the bizarro universe.
-    ///
-    /// I would strongly recommend to choose DENOM as `1 << x` for x in 0..63.
-    ///
-    /// The regular operations (+,-, *, /) behave just like on a regular integer,
-    ///     panic on overflow in debug mode,
-    ///     wrapping in release mode.
-    /// Use the wrapping_op, checked_op or saturating_op methods
-    ///     to explicitly chose a behaviour.
-    #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-    #[repr(transparent)]
-    #[cfg_attr(feature = "serde1", derive(sd::Serialize, sd::Deserialize))]
-    pub struct Rational<const DENOM: i64> {
-        numer: i64,
+    /// This should compile to a no-op.
+    pub fn to_storage(self) -> i64 {
+        self.numer
     }
-    impl<const DENOM: i64> Rational<DENOM> {
-        /// Returns the underlying integer type,
-        /// for example for storing in an atomic number.
-        ///
-        /// This should compile to a no-op.
-        pub fn to_storage(self) -> i64 {
-            self.numer
-        }
-        /// Builds from the underlying integer type,
-        /// for example after retrieving from an atomic number.
-        ///
-        /// This should compile to a no-op.
-        ///
-        /// Use [from_int](Self::from_int) if you have an integer that you want to convert to a rational.
-        pub fn from_storage(storage: i64) -> Self {
-            Self { numer: storage }
+    /// Builds from the underlying integer type,
+    /// for example after retrieving from an atomic number.
+    ///
+    /// This should compile to a no-op.
+    ///
+    /// Use [from_int](Self::from_int) if you have an integer that you want to convert to a rational.
+    pub fn from_storage(storage: i64) -> Self {
+        Self { numer: storage }
+    }
+
+    /// Converts an integer to a Rational.
+    pub fn from_int(i: i64) -> Self {
+        Self { numer: i * DENOM }
+    }
+    /// Since rational numbers can not represent inf, nan and other fuckery,
+    /// this returns None if the input is wrong.
+    ///
+    /// This will loose precision,
+    /// try to only convert at the start and end of your calculation.
+    pub fn aprox_float_fast(f: f64) -> Option<Self> {
+        use core::num::FpCategory as Cat;
+        if let Cat::Subnormal | Cat::Normal | Cat::Zero = f.classify() {
+        } else {
+            return None;
         }
 
-        /// Converts an integer to a Rational.
-        pub fn from_int(i: i64) -> Self {
-            Self { numer: i * DENOM }
+        // this is really not very accurate
+        // as the expansion step kills a lot of accuracy the float might have had
+        // (denom is really big, int_max/representable_range)
+        let expanded = f * (DENOM as f64);
+        Some(Self {
+            numer: expanded as i64,
+        })
+    }
+
+    /// Assumes denom to be a power of two.
+    /// kind of experimental.
+    #[doc(hidden)]
+    pub fn aprox_float(f: f64) -> Option<Self> {
+        use core::num::FpCategory as Cat;
+        match f.classify() {
+            //fixme: im reasonably sure that subnormal needs to be handled different
+            //(implicit 1 or something along those lines)
+            Cat::Subnormal | Cat::Normal => {}
+            Cat::Zero => return Self::from(0).into(),
+            _ => return None,
         }
-        /// Since rational numbers can not represent inf, nan and other fuckery,
-        /// this returns None if the input is wrong.
-        ///
-        /// This will loose precision,
-        /// try to only convert at the start and end of your calculation.
-        pub fn aprox_float_fast(f: f64) -> Option<Self> {
-            use core::num::FpCategory as Cat;
-            if let Cat::Subnormal | Cat::Normal | Cat::Zero = f.classify() {
-            } else {
+        use num_traits::float::FloatCore;
+        let (mant, f_exp, sign) = f.integer_decode();
+        //exp is << or >> on the mant depending on sign
+        let d_exp = 64 - (DENOM as u64).leading_zeros();
+        //let rest = DENOM - (1 << d_exp);
+
+        let exp = f_exp + (d_exp as i16);
+        let neg = exp.is_negative();
+        let exp = exp.abs() as u32;
+        let numer = if !neg {
+            // make sure we have enough headroom
+            // cheked_shl/r does not! do this check
+            if mant.leading_zeros() < exp {
                 return None;
             }
+            mant << exp
+        } else {
+            // not checking for "bottom"-room here as we are
+            // "just" loosing precision, not orders of magnitude
+            mant >> exp
+        };
+        let numer = numer as i64;
+        let numer = if sign.is_negative() { -numer } else { numer };
+        // fixme: do something about the rest??
+        // hm, or just allow 1<<x as denom, sounds senible too
+        Self { numer }.into()
+    }
 
-            // this is really not very accurate
-            // as the expansion step kills a lot of accuracy the float might have had
-            // (denom is really big, int_max/representable_range)
-            let expanded = f * (DENOM as f64);
-            Some(Self {
-                numer: expanded as i64,
-            })
-        }
+    /// This will loose precision,
+    /// try to only convert at the start and end of your calculation.
+    pub fn to_f64(self) -> f64 {
+        //todo: can i do a *thing* with this to get some more precision?
+        //(i.e. bitbang the float?)
+        self.numer as f64 / DENOM as f64
+    }
 
-        /// Assumes denom to be a power of two.
-        /// kind of experimental.
-        #[doc(hidden)]
-        pub fn aprox_float(f: f64) -> Option<Self> {
-            use core::num::FpCategory as Cat;
-            match f.classify() {
-                //fixme: im reasonably sure that subnormal needs to be handled different
-                //(implicit 1 or something along those lines)
-                Cat::Subnormal | Cat::Normal => {}
-                Cat::Zero => return Self::from(0).into(),
-                _ => return None,
-            }
-            use num_traits::float::FloatCore;
-            let (mant, f_exp, sign) = f.integer_decode();
-            //exp is << or >> on the mant depending on sign
-            let d_exp = 64 - (DENOM as u64).leading_zeros();
-            //let rest = DENOM - (1 << d_exp);
+    /// this will integer-round, potentially loosing a lot of precision.
+    pub fn to_i64(self) -> i64 {
+        self.numer / DENOM
+    }
 
-            let exp = f_exp + (d_exp as i16);
-            let neg = exp.is_negative();
-            let exp = exp.abs() as u32;
-            let numer = if !neg {
-                // make sure we have enough headroom
-                // cheked_shl/r does not! do this check
-                if mant.leading_zeros() < exp {
-                    return None;
-                }
-                mant << exp
-            } else {
-                // not checking for "bottom"-room here as we are
-                // "just" loosing precision, not orders of magnitude
-                mant >> exp
-            };
-            let numer = numer as i64;
-            let numer = if sign.is_negative() { -numer } else { numer };
-            // fixme: do something about the rest??
-            // hm, or just allow 1<<x as denom, sounds senible too
-            Self { numer }.into()
-        }
+    pub fn clamp(self, low: Self, high: Self) -> Self {
+        self.max(low).min(high)
+    }
+    /// The maximum representable number.
+    ///
+    /// Note that unlike floats rationals do not have pos/neg inf.
+    pub const fn max() -> Self {
+        Self { numer: i64::MAX }
+    }
+    /// The minimum representable number.
+    ///
+    /// Note that unlike floats rationals do not have pos/neg inf.
+    pub const fn min() -> Self {
+        Self { numer: i64::MIN }
+    }
 
-        /// This will loose precision,
-        /// try to only convert at the start and end of your calculation.
-        pub fn to_f64(self) -> f64 {
-            //todo: can i do a *thing* with this to get some more precision?
-            //(i.e. bitbang the float?)
-            self.numer as f64 / DENOM as f64
+    pub fn checked_add(self, other: Self) -> Option<Self> {
+        Self {
+            numer: self.numer.checked_add(other.numer)?,
         }
+        .into()
+    }
+    pub fn checked_mul(self, other: Self) -> Option<Self> {
+        Self {
+            numer: self.numer.checked_mul(other.numer)?,
+        }
+        .into()
+    }
+    pub fn checked_sub(self, other: Self) -> Option<Self> {
+        Self {
+            numer: self.numer.checked_sub(other.numer)?,
+        }
+        .into()
+    }
+    pub fn checked_div(self, other: Self) -> Option<Self> {
+        Self {
+            numer: self.numer.checked_div(other.numer)?,
+        }
+        .into()
+    }
 
-        /// this will integer-round, potentially loosing a lot of precision.
-        pub fn to_i64(self) -> i64 {
-            self.numer / DENOM
+    pub fn wrapping_add(self, other: Self) -> Self {
+        Self {
+            numer: self.numer.wrapping_add(other.numer),
         }
-
-        pub fn clamp(self, low: Self, high: Self) -> Self {
-            self.max(low).min(high)
+    }
+    pub fn wrapping_mul(self, other: i64) -> Self {
+        Self {
+            numer: self.numer.wrapping_mul(other),
         }
-        /// The maximum representable number.
-        ///
-        /// Note that unlike floats rationals do not have pos/neg inf.
-        pub const fn max() -> Self {
-            Self { numer: i64::MAX }
+    }
+    pub fn wrapping_sub(self, other: Self) -> Self {
+        Self {
+            numer: self.numer.wrapping_sub(other.numer),
         }
-        /// The minimum representable number.
-        ///
-        /// Note that unlike floats rationals do not have pos/neg inf.
-        pub const fn min() -> Self {
-            Self { numer: i64::MIN }
-        }
-
-        pub fn checked_add(self, other: Self) -> Option<Self> {
-            Self {
-                numer: self.numer.checked_add(other.numer)?,
-            }
-            .into()
-        }
-        pub fn checked_mul(self, other: Self) -> Option<Self> {
-            Self {
-                numer: self.numer.checked_mul(other.numer)?,
-            }
-            .into()
-        }
-        pub fn checked_sub(self, other: Self) -> Option<Self> {
-            Self {
-                numer: self.numer.checked_sub(other.numer)?,
-            }
-            .into()
-        }
-        pub fn checked_div(self, other: Self) -> Option<Self> {
-            Self {
-                numer: self.numer.checked_div(other.numer)?,
-            }
-            .into()
-        }
-
-        pub fn wrapping_add(self, other: Self) -> Self {
-            Self {
-                numer: self.numer.wrapping_add(other.numer),
-            }
-        }
-        pub fn wrapping_mul(self, other: i64) -> Self {
-            Self {
-                numer: self.numer.wrapping_mul(other),
-            }
-        }
-        pub fn wrapping_sub(self, other: Self) -> Self {
-            Self {
-                numer: self.numer.wrapping_sub(other.numer),
-            }
-        }
-        pub fn wrapping_div(self, other: i64) -> Self {
-            Self {
-                numer: self.numer.wrapping_div(other),
-            }
-        }
-
-        /// Don't use this in parallel code if other parallel code is also subtracting,
-        /// otherwise you loose determinism.
-        ///
-        /// ```
-        /// use fix_rat::Rational;
-        /// let max = Rational::<{1024}>::max();
-        /// let one = Rational::<{1024}>::from_int(1);
-        /// assert_ne!(max.saturating_add(one)-max, (max-max).saturating_add(one));
-        /// ```
-        pub fn saturating_add(self, other: Self) -> Self {
-            Self {
-                numer: self.numer.saturating_add(other.numer),
-            }
-        }
-        pub fn saturating_mul(self, other: i64) -> Self {
-            Self {
-                numer: self.numer.saturating_mul(other),
-            }
-        }
-        pub fn saturating_sub(self, other: Self) -> Self {
-            Self {
-                numer: self.numer.saturating_sub(other.numer),
-            }
+    }
+    pub fn wrapping_div(self, other: i64) -> Self {
+        Self {
+            numer: self.numer.wrapping_div(other),
         }
     }
 
-    impl<const DENOM: i64> From<f64> for Rational<DENOM> {
-        fn from(o: f64) -> Self {
-            // apparently _fast is not less precise than "regular" so using that for now
-            // might change at a moments notice though
-            Self::aprox_float_fast(o).unwrap()
+    /// Don't use this in parallel code if other parallel code is also subtracting,
+    /// otherwise you loose determinism.
+    ///
+    /// ```
+    /// use fix_rat::Rational;
+    /// let max = Rational::<{1024}>::max();
+    /// let one = Rational::<{1024}>::from_int(1);
+    /// assert_ne!(max.saturating_add(one)-max, (max-max).saturating_add(one));
+    /// ```
+    pub fn saturating_add(self, other: Self) -> Self {
+        Self {
+            numer: self.numer.saturating_add(other.numer),
         }
     }
-    impl<const DENOM: i64> From<i64> for Rational<DENOM> {
-        fn from(o: i64) -> Self {
-            Self::from_int(o)
+    pub fn saturating_mul(self, other: i64) -> Self {
+        Self {
+            numer: self.numer.saturating_mul(other),
         }
     }
-
-    impl<const DENOM: i64> core::ops::Add for Rational<DENOM> {
-        type Output = Self;
-        fn add(self, other: Self) -> Self {
-            Self {
-                numer: self.numer + other.numer,
-            }
+    pub fn saturating_sub(self, other: Self) -> Self {
+        Self {
+            numer: self.numer.saturating_sub(other.numer),
         }
     }
+}
 
-    impl<const DENOM: i64> core::ops::Sub for Rational<DENOM> {
-        type Output = Self;
-        fn sub(self, other: Self) -> Self {
-            Self {
-                numer: self.numer - other.numer,
-            }
+impl<const DENOM: i64> From<f64> for Rational<DENOM> {
+    fn from(o: f64) -> Self {
+        // apparently _fast is not less precise than "regular" so using that for now
+        // might change at a moments notice though
+        Self::aprox_float_fast(o).unwrap()
+    }
+}
+impl<const DENOM: i64> From<i64> for Rational<DENOM> {
+    fn from(o: i64) -> Self {
+        Self::from_int(o)
+    }
+}
+
+impl<const DENOM: i64> core::ops::Add for Rational<DENOM> {
+    type Output = Self;
+    fn add(self, other: Self) -> Self {
+        Self {
+            numer: self.numer + other.numer,
         }
     }
+}
 
-    impl<const DENOM: i64> core::ops::Mul<i64> for Rational<DENOM> {
-        type Output = Self;
-        fn mul(self, other: i64) -> Self {
-            Self {
-                numer: self.numer * other,
-            }
+impl<const DENOM: i64> core::ops::Sub for Rational<DENOM> {
+    type Output = Self;
+    fn sub(self, other: Self) -> Self {
+        Self {
+            numer: self.numer - other.numer,
         }
     }
+}
 
-    impl<const DENOM: i64> core::ops::Div<i64> for Rational<DENOM> {
-        type Output = Self;
-        fn div(self, other: i64) -> Self {
-            Self {
-                numer: self.numer / other,
-            }
+impl<const DENOM: i64> core::ops::Mul<i64> for Rational<DENOM> {
+    type Output = Self;
+    fn mul(self, other: i64) -> Self {
+        Self {
+            numer: self.numer * other,
         }
     }
+}
 
-    impl<const DENOM: i64> core::iter::Sum for Rational<DENOM> {
-        fn sum<I>(i: I) -> Self
-        where
-            I: Iterator<Item = Self>,
-        {
-            i.fold(Self::from(0), |sum, new| sum + new)
+impl<const DENOM: i64> core::ops::Div<i64> for Rational<DENOM> {
+    type Output = Self;
+    fn div(self, other: i64) -> Self {
+        Self {
+            numer: self.numer / other,
         }
     }
+}
 
-    /// SAFETY: this is literally just an i64, transparent representation and all, this is therefore
-    /// safe.
-    /// can not auto-derive cause the derive macro can not very alignment in generic types.
-    unsafe impl<const DENOM: i64> bytemuck::NoUninit for Rational<DENOM> {}
-
-    impl<const DENOMS: i64, const DENOMO: i64> core::ops::Mul<Rational<DENOMO>> for Rational<DENOMS>
+impl<const DENOM: i64> core::iter::Sum for Rational<DENOM> {
+    fn sum<I>(i: I) -> Self
     where
-        [(); { DENOMS * DENOMO } as usize]:,
+        I: Iterator<Item = Self>,
     {
-        type Output = Rational<{ DENOMS * DENOMO }>;
-        fn mul(self, other: Rational<DENOMO>) -> Self::Output {
-            Self::Output {
-                numer: self.numer * other.numer,
-            }
+        i.fold(Self::from(0), |sum, new| sum + new)
+    }
+}
+
+/// SAFETY: this is literally just an i64, transparent representation and all, this is therefore
+/// safe.
+/// can not auto-derive cause the derive macro can not very alignment in generic types.
+unsafe impl<const DENOM: i64> bytemuck::NoUninit for Rational<DENOM> {}
+
+#[cfg(feature = "nightly")]
+impl<const DENOMS: i64, const DENOMO: i64> core::ops::Mul<Rational<DENOMO>> for Rational<DENOMS>
+where
+    [(); { DENOMS * DENOMO } as usize]:,
+{
+    type Output = Rational<{ DENOMS * DENOMO }>;
+    fn mul(self, other: Rational<DENOMO>) -> Self::Output {
+        Self::Output {
+            numer: self.numer * other.numer,
         }
     }
 }
@@ -436,7 +432,7 @@ fn converts() {
 
 #[test]
 fn maths() {
-    let num: Rational<{1<<30}> = 0.1.into();
+    let num: Rational<{ 1 << 30 }> = 0.1.into();
 
     let add = (num + num).to_f64() - 0.2;
     assert!(add.abs() < 0.00001);
@@ -444,11 +440,14 @@ fn maths() {
     let sub = (num - num - num).to_f64() + 0.1;
     assert!(sub.abs() < 0.00001);
 
-    let bignum: Rational<{1<<30}> = 10.0.into();
-    let mul = (num * num).to_f64() - 0.01;
-    assert!(mul.abs() < 0.00001);
-    let mul2 = (num * bignum).to_f64() - 1.0;
-    assert!(mul2.abs() < 0.00001);
+    #[cfg(feature = "nightly")]
+    {
+        let bignum: Rational<{ 1 << 30 }> = 10.0.into();
+        let mul = (num * num).to_f64() - 0.01;
+        assert!(mul.abs() < 0.00001);
+        let mul2 = (num * bignum).to_f64() - 1.0;
+        assert!(mul2.abs() < 0.00001);
+    }
 
     /* TODO: add div..maybe
     let div = (num / num).to_f64() - 1.0;
@@ -464,8 +463,8 @@ fn precision() {
     extern crate std;
     use std::dbg;
     let f = 640.132143234189097_f64;
-    let r: R = nightly::Rational::aprox_float(f).unwrap();
-    let r2: R = nightly::Rational::aprox_float_fast(f).unwrap();
+    let r: R = Rational::aprox_float(f).unwrap();
+    let r2: R = Rational::aprox_float_fast(f).unwrap();
     let rf = r.to_f64();
     // ok so turns out that the fast conversion is actually not worse.
     // i guess multiplying/diving by 2potn is kinda what floats are good at

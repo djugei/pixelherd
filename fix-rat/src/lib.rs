@@ -360,6 +360,7 @@ mod nightly {
             Self::from_int(o)
         }
     }
+
     impl<const DENOM: i64> core::ops::Add for Rational<DENOM> {
         type Output = Self;
         fn add(self, other: Self) -> Self {
@@ -368,6 +369,7 @@ mod nightly {
             }
         }
     }
+
     impl<const DENOM: i64> core::ops::Sub for Rational<DENOM> {
         type Output = Self;
         fn sub(self, other: Self) -> Self {
@@ -376,6 +378,7 @@ mod nightly {
             }
         }
     }
+
     impl<const DENOM: i64> core::ops::Mul<i64> for Rational<DENOM> {
         type Output = Self;
         fn mul(self, other: i64) -> Self {
@@ -384,6 +387,7 @@ mod nightly {
             }
         }
     }
+
     impl<const DENOM: i64> core::ops::Div<i64> for Rational<DENOM> {
         type Output = Self;
         fn div(self, other: i64) -> Self {
@@ -402,7 +406,7 @@ mod nightly {
         }
     }
 
-    /// safety: this is literally just a i64, transparent representation and all, this is therefore
+    /// SAFETY: this is literally just an i64, transparent representation and all, this is therefore
     /// safe.
     /// can not auto-derive cause the derive macro can not very alignment in generic types.
     unsafe impl<const DENOM: i64> bytemuck::NoUninit for Rational<DENOM> {}

@@ -306,9 +306,9 @@ mod nightly {
                 numer: self.numer.wrapping_add(other.numer),
             }
         }
-        pub fn wrapping_mul(self, other: Self) -> Self {
+        pub fn wrapping_mul(self, other: i64) -> Self {
             Self {
-                numer: self.numer.wrapping_mul(other.numer),
+                numer: self.numer.wrapping_mul(other),
             }
         }
         pub fn wrapping_sub(self, other: Self) -> Self {
@@ -316,9 +316,9 @@ mod nightly {
                 numer: self.numer.wrapping_sub(other.numer),
             }
         }
-        pub fn wrapping_div(self, other: Self) -> Self {
+        pub fn wrapping_div(self, other: i64) -> Self {
             Self {
-                numer: self.numer.wrapping_div(other.numer),
+                numer: self.numer.wrapping_div(other),
             }
         }
 
@@ -336,9 +336,9 @@ mod nightly {
                 numer: self.numer.saturating_add(other.numer),
             }
         }
-        pub fn saturating_mul(self, other: Self) -> Self {
+        pub fn saturating_mul(self, other: i64) -> Self {
             Self {
-                numer: self.numer.saturating_mul(other.numer),
+                numer: self.numer.saturating_mul(other),
             }
         }
         pub fn saturating_sub(self, other: Self) -> Self {
